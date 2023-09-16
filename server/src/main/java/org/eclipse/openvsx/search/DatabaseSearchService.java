@@ -12,23 +12,24 @@ package org.eclipse.openvsx.search;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.eclipse.openvsx.util.TargetPlatform;
+import org.eclipse.openvsx.util.VersionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.elasticsearch.core.*;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.elasticsearch.core.SearchHit;
-import org.springframework.data.elasticsearch.core.SearchHits;
-import org.springframework.data.elasticsearch.core.SearchHitsImpl;
-import org.springframework.data.elasticsearch.core.TotalHitsRelation;
 import org.eclipse.openvsx.entities.Extension;
 import org.eclipse.openvsx.repositories.RepositoryService;
 import org.eclipse.openvsx.search.RelevanceService.SearchStats;
-import org.elasticsearch.search.aggregations.Aggregations;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 
+import jakarta.transaction.Transactional;
+
+import static org.eclipse.openvsx.cache.CacheService.CACHE_AVERAGE_REVIEW_RATING;
 import static org.eclipse.openvsx.cache.CacheService.CACHE_DATABASE_SEARCH;
 
 /**
@@ -50,15 +51,26 @@ public class DatabaseSearchService implements ISearchService {
     @Autowired
     RepositoryService repositories;
 
+    @Autowired
+    VersionService versions;
+
+    @Transactional
     @Cacheable(CACHE_DATABASE_SEARCH)
-    public SearchHits<ExtensionSearch> search(ISearchService.Options options, Pageable pageRequest) {
+    @CacheEvict(value = CACHE_AVERAGE_REVIEW_RATING, allEntries = true)
+    public SearchHits<ExtensionSearch> search(ISearchService.Options options) {
         // grab all extensions
         var matchingExtensions = repositories.findAllActiveExtensions();
 
         // no extensions in the database
         if (matchingExtensions.isEmpty()) {
-            Aggregations aggregations = new Aggregations(Collections.emptyList());
-            return new SearchHitsImpl<ExtensionSearch>(0,TotalHitsRelation.OFF, 0f, "", Collections.emptyList(), aggregations);
+            return new SearchHitsImpl<>(0,TotalHitsRelation.OFF, 0f, null, null, Collections.emptyList(), null, null);
+        }
+
+        // exlude namespaces
+        if(options.namespacesToExclude != null) {
+            for(var namespaceToExclude : options.namespacesToExclude) {
+                matchingExtensions = matchingExtensions.filter(extension -> !extension.getNamespace().getName().equals(namespaceToExclude));
+            }
         }
 
         // filter target platform
@@ -68,48 +80,52 @@ public class DatabaseSearchService implements ISearchService {
 
         // filter category
         if (options.category != null) {
-            matchingExtensions = matchingExtensions.filter(extension -> extension.getLatest().getCategories().stream()
-                    .anyMatch(category -> category.equalsIgnoreCase(options.category)));
+            matchingExtensions = matchingExtensions.filter(extension -> {
+                var latest = versions.getLatest(extension, null, false, true);
+                return latest.getCategories().stream().anyMatch(category -> category.equalsIgnoreCase(options.category));
+            });
         }
 
         // filter text
         if (options.queryString != null) {
-            matchingExtensions = matchingExtensions.filter(extension ->
-            extension.getName().toLowerCase().contains(options.queryString.toLowerCase())
+            matchingExtensions = matchingExtensions.filter(extension -> {
+                var latest = versions.getLatest(extension, null, false, true);
+                return extension.getName().toLowerCase().contains(options.queryString.toLowerCase())
                     || extension.getNamespace().getName().contains(options.queryString.toLowerCase())
-                    || (extension.getLatest().getDescription() != null && extension.getLatest().getDescription()
-                            .toLowerCase().contains(options.queryString.toLowerCase()))
-                    || (extension.getLatest().getDisplayName() != null && extension.getLatest().getDisplayName()
-                            .toLowerCase().contains(options.queryString.toLowerCase())));
+                    || (latest.getDescription() != null && latest.getDescription()
+                        .toLowerCase().contains(options.queryString.toLowerCase()))
+                    || (latest.getDisplayName() != null && latest.getDisplayName()
+                        .toLowerCase().contains(options.queryString.toLowerCase()));
+            });
         }
-
-        List<ExtensionSearch> sortedExtensions;
 
         // need to perform the sortBy ()
-        // 'relevance' | 'timestamp' | 'averageRating' | 'downloadCount';
+        // 'relevance' | 'timestamp' | 'rating' | 'downloadCount';
 
-        if ("relevance".equals(options.sortBy)) {
-            // for relevance we're using relevance service to get the relevance item
+        Stream<ExtensionSearch> searchEntries;
+        if("relevance".equals(options.sortBy) || "rating".equals(options.sortBy)) {
             var searchStats = new SearchStats(repositories);
-
-            // needs to add relevance on extensions
-            sortedExtensions = matchingExtensions
-                    .map(extension -> relevanceService.toSearchEntry(extension, searchStats))
-                    .stream()
-                    .sorted(new RelevanceComparator())
-                    .collect(Collectors.toList());
+            searchEntries = matchingExtensions.stream().map(extension -> relevanceService.toSearchEntry(extension, searchStats));
         } else {
-            sortedExtensions = matchingExtensions.stream()
-                    .map(Extension::toSearch)
-                    .collect(Collectors.toList());
-            if ("downloadCount".equals(options.sortBy)) {
-                sortedExtensions.sort(new DownloadedCountComparator());
-            } else if ("averageRating".equals(options.sortBy)) {
-                sortedExtensions.sort(new AverageRatingComparator());
-            } else if ("timestamp".equals(options.sortBy)) {
-                sortedExtensions.sort(new TimestampComparator());
-            }
+            searchEntries = matchingExtensions.stream().map(extension -> {
+                var latest = versions.getLatest(extension, null, false, true);
+                return extension.toSearch(latest);
+            });
         }
+
+        var comparators = new HashMap<>(Map.of(
+                "relevance", new RelevanceComparator(),
+                "timestamp", new TimestampComparator(),
+                "rating", new RatingComparator(),
+                "downloadCount", new DownloadedCountComparator()
+        ));
+
+        var comparator = comparators.get(options.sortBy);
+        if(comparator != null) {
+            searchEntries = searchEntries.sorted(comparator);
+        }
+
+        var sortedExtensions = searchEntries.collect(Collectors.toList());
 
         // need to do sortOrder
         // 'asc' | 'desc';
@@ -120,65 +136,60 @@ public class DatabaseSearchService implements ISearchService {
 
         // Paging
         var totalHits = sortedExtensions.size();
-        if (pageRequest != null) {
-            var pageNumber = pageRequest.getPageNumber();
-            var pageSize = pageRequest.getPageSize();
-
-            var toSkip = 0;
-            if (pageNumber >= 1) {
-                // page is zero indexed
-                toSkip = pageNumber * (pageSize - 1) + pageNumber;
-            }
-            // if something to skip, remove the first elements
-            if (toSkip > 0 && toSkip < sortedExtensions.size()) {
-                sortedExtensions = sortedExtensions.subList(toSkip, sortedExtensions.size());
-            }
-
-            // keep only the pageSize elements
-            if (sortedExtensions.size() > pageSize) {
-                sortedExtensions = sortedExtensions.subList(0, pageSize);
-            }
-        }
+        var endIndex = Math.min(sortedExtensions.size(), options.requestedOffset + options.requestedSize);
+        var startIndex = Math.min(endIndex, options.requestedOffset);
+        sortedExtensions = sortedExtensions.subList(startIndex, endIndex);
 
         List<SearchHit<ExtensionSearch>> searchHits;
         if (sortedExtensions.isEmpty()) {
             searchHits = Collections.emptyList();
         } else {
             // client is interested only in the extension IDs
-            searchHits = sortedExtensions.stream().map(extensionSearch -> {
-                return new SearchHit<ExtensionSearch>(null, null, 0.0f, Collections.emptyList().toArray(),
-                        Collections.emptyMap(), extensionSearch);
-            }).collect(Collectors.toList());
+            searchHits = sortedExtensions.stream().map(extensionSearch -> new SearchHit<>(null, null, null, 0.0f, null, null, null, null, null, null, extensionSearch)).collect(Collectors.toList());
         }
 
-        Aggregations aggregations = new Aggregations(Collections.emptyList());
-        SearchHits<ExtensionSearch> searchHitsResult = new SearchHitsImpl<ExtensionSearch>(totalHits,
-                TotalHitsRelation.OFF, 0f, "", searchHits, aggregations);
-
-        return searchHitsResult;
+        return new SearchHitsImpl<>(totalHits, TotalHitsRelation.OFF, 0f, null, null, searchHits, null, null);
     }
 
     /**
      * Clear the cache when asked to update the search index. It could be done also
      * through a cron job as well
      */
-    @CacheEvict(value = CACHE_DATABASE_SEARCH)
     @Override
+    @CacheEvict(value = CACHE_DATABASE_SEARCH, allEntries = true)
     public void updateSearchIndex(boolean clear) {
 
     }
 
     @Override
-    public void updateSearchEntry(Extension extension) {
-        // refresh the index
-        this.updateSearchIndex(true);
+    @Async
+    @CacheEvict(value = CACHE_DATABASE_SEARCH, allEntries = true)
+    public void updateSearchEntriesAsync(List<Extension> extensions) {
 
     }
 
     @Override
+    @CacheEvict(value = CACHE_DATABASE_SEARCH, allEntries = true)
+    public void updateSearchEntries(List<Extension> extensions) {
+
+    }
+
+    @Override
+    @CacheEvict(value = CACHE_DATABASE_SEARCH, allEntries = true)
+    public void updateSearchEntry(Extension extension) {
+
+    }
+
+    @Override
+    @CacheEvict(value = CACHE_DATABASE_SEARCH, allEntries = true)
+    public void removeSearchEntries(Collection<Long> ids) {
+
+    }
+
+    @Override
+    @CacheEvict(value = CACHE_DATABASE_SEARCH, allEntries = true)
     public void removeSearchEntry(Extension extension) {
-        // refresh the index
-        this.updateSearchIndex(true);
+
     }
 
     /**
@@ -196,17 +207,17 @@ public class DatabaseSearchService implements ISearchService {
     /**
      * Sort by averageRating
      */
-    class AverageRatingComparator implements Comparator<ExtensionSearch> {
+    class RatingComparator implements Comparator<ExtensionSearch> {
 
         @Override
         public int compare(ExtensionSearch ext1, ExtensionSearch ext2) {
-            if (ext1.averageRating == null) {
+            if (ext1.rating == null) {
                 return -1;
-            } else if (ext2.averageRating == null) {
+            } else if (ext2.rating == null) {
                 return 1;
             }
-            // averageRating
-            return Double.compare(ext1.averageRating, ext2.averageRating);
+            // rating
+            return Double.compare(ext1.rating, ext2.rating);
         }
     }
 
@@ -220,7 +231,6 @@ public class DatabaseSearchService implements ISearchService {
             // timestamp
             return Long.compare(ext1.timestamp, ext2.timestamp);
         }
-
     }
 
     /**
@@ -232,7 +242,5 @@ public class DatabaseSearchService implements ISearchService {
         public int compare(ExtensionSearch ext1, ExtensionSearch ext2) {
             return Double.compare(ext1.relevance, ext2.relevance);
         }
-
     }
-
 }

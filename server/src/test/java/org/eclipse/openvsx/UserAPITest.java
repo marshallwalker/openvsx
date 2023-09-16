@@ -21,13 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-import javax.persistence.EntityManager;
+import jakarta.persistence.EntityManager;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import net.javacrumbs.shedlock.core.LockProvider;
 import org.eclipse.openvsx.cache.CacheService;
+import org.eclipse.openvsx.cache.LatestExtensionVersionCacheKeyGenerator;
 import org.eclipse.openvsx.eclipse.EclipseService;
 import org.eclipse.openvsx.entities.Namespace;
 import org.eclipse.openvsx.entities.NamespaceMembership;
@@ -41,7 +38,10 @@ import org.eclipse.openvsx.json.ResultJson;
 import org.eclipse.openvsx.json.UserJson;
 import org.eclipse.openvsx.repositories.RepositoryService;
 import org.eclipse.openvsx.security.OAuth2UserServices;
+import org.eclipse.openvsx.security.SecurityConfig;
 import org.eclipse.openvsx.security.TokenService;
+import org.eclipse.openvsx.storage.StorageUtilService;
+import org.eclipse.openvsx.util.VersionService;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,24 +51,33 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.util.Streamable;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 @WebMvcTest(UserAPI.class)
 @AutoConfigureWebClient
-@MockBean({ EntityManager.class, ClientRegistrationRepository.class, LockProvider.class, CacheService.class })
+@MockBean({
+        EclipseService.class, ClientRegistrationRepository.class, StorageUtilService.class, CacheService.class,
+        ExtensionValidator.class, SimpleMeterRegistry.class
+})
 public class UserAPITest {
 
     @SpyBean
     UserService users;
 
     @MockBean
-    RepositoryService repositories;
-
+    EntityManager entityManager;
+    
     @MockBean
-    EclipseService eclipse;
+    RepositoryService repositories;
 
     @Autowired
     MockMvc mockMvc;
@@ -149,6 +158,8 @@ public class UserAPITest {
         token.setActive(true);
         Mockito.when(repositories.findAccessToken(100))
                 .thenReturn(token);
+        Mockito.when(entityManager.merge(userData))
+                .thenReturn(userData);
 
         mockMvc.perform(post("/user/token/delete/{id}", 100)
                 .with(user("test_user"))
@@ -488,6 +499,8 @@ public class UserAPITest {
         membership2.setRole(NamespaceMembership.ROLE_OWNER);
         Mockito.when(repositories.findMemberships(userData, NamespaceMembership.ROLE_OWNER))
                 .thenReturn(Streamable.of(membership1, membership2));
+        Mockito.when(repositories.findMemberships(userData, NamespaceMembership.ROLE_CONTRIBUTOR))
+                .thenReturn(Streamable.empty());
     }
 
     private String namespacesJson(Consumer<List<NamespaceJson>> content) throws JsonProcessingException {
@@ -536,6 +549,7 @@ public class UserAPITest {
     }
     
     @TestConfiguration
+    @Import(SecurityConfig.class)
     static class TestConfig {
         @Bean
         TransactionTemplate transactionTemplate() {
@@ -550,6 +564,16 @@ public class UserAPITest {
         @Bean
         TokenService tokenService() {
             return new TokenService();
+        }
+
+        @Bean
+        VersionService versionService() {
+            return new VersionService();
+        }
+
+        @Bean
+        LatestExtensionVersionCacheKeyGenerator latestExtensionVersionCacheKeyGenerator() {
+            return new LatestExtensionVersionCacheKeyGenerator();
         }
     }
     

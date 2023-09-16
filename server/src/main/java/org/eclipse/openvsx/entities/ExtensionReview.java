@@ -11,11 +11,7 @@ package org.eclipse.openvsx.entities;
 
 import java.time.LocalDateTime;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.ManyToOne;
+import jakarta.persistence.*;
 
 import org.eclipse.openvsx.json.ReviewJson;
 import org.eclipse.openvsx.util.TimeUtil;
@@ -24,8 +20,9 @@ import org.eclipse.openvsx.util.TimeUtil;
 public class ExtensionReview {
 
     @Id
-    @GeneratedValue
-    long id;
+	@GeneratedValue(generator = "extensionReviewSeq")
+	@SequenceGenerator(name = "extensionReviewSeq", sequenceName = "extension_review_seq")
+	long id;
 
     @ManyToOne
     Extension extension;

@@ -9,8 +9,10 @@
  ********************************************************************************/
 package org.eclipse.openvsx.search;
 
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.eclipse.openvsx.entities.Extension;
 
@@ -27,7 +29,7 @@ public interface ISearchService {
     /**
      * Search with given options
      */
-    SearchHits<ExtensionSearch> search(Options options, Pageable pageRequest);
+    SearchHits<ExtensionSearch> search(Options options);
 
     /**
      * Updating the search index has two modes:
@@ -39,6 +41,13 @@ public interface ISearchService {
     void updateSearchIndex(boolean clear);
 
     /**
+     * The given extensions have been added to the registry, we need to refresh the search index.
+     */
+    void updateSearchEntries(List<Extension> extensions);
+
+    void updateSearchEntriesAsync(List<Extension> extensions);
+
+    /**
      * The given extension has been added to the registry, we need to refresh the search index.
      */
     void updateSearchEntry(Extension extension);
@@ -47,6 +56,11 @@ public interface ISearchService {
      * The given extension has been removed from the registry, we need to refresh the search index.
      */
     void removeSearchEntry(Extension extension);
+
+    /**
+     * The given extensions have been removed from the registry, we need to refresh the search index.
+     */
+    void removeSearchEntries(Collection<Long> ids);
 
     public static class Options {
         public final String queryString;
@@ -57,9 +71,10 @@ public interface ISearchService {
         public final String sortOrder;
         public final String sortBy;
         public final boolean includeAllVersions;
+        public final String[] namespacesToExclude;
 
         public Options(String queryString, String category, String targetPlatform, int size, int offset,
-                       String sortOrder, String sortBy, boolean includeAllVersions) {
+                       String sortOrder, String sortBy, boolean includeAllVersions, String... namespacesToExclude) {
             this.queryString = queryString;
             this.category = category;
             this.targetPlatform = targetPlatform;
@@ -68,40 +83,30 @@ public interface ISearchService {
             this.sortOrder = sortOrder;
             this.sortBy = sortBy;
             this.includeAllVersions = includeAllVersions;
+            this.namespacesToExclude = namespacesToExclude;
         }
 
         @Override
-        public boolean equals(Object obj) {
-            if (obj == this)
-                return true;
-            if (!(obj instanceof Options))
-                return false;
-            var other = (Options) obj;
-            if (!Objects.equals(this.queryString, other.queryString))
-                return false;
-            if (!Objects.equals(this.category, other.category))
-                return false;
-            if (!Objects.equals(this.targetPlatform, other.targetPlatform))
-                return false;
-            if (this.requestedSize != other.requestedSize)
-                return false;
-            if (this.requestedOffset != other.requestedOffset)
-                return false;
-            if (!Objects.equals(this.sortOrder, other.sortOrder))
-                return false;
-            if (!Objects.equals(this.sortBy, other.sortBy))
-                return false;
-            if (this.includeAllVersions != other.includeAllVersions)
-                return false;
-            return true;
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Options options = (Options) o;
+            return requestedSize == options.requestedSize
+                    && requestedOffset == options.requestedOffset
+                    && includeAllVersions == options.includeAllVersions
+                    && Objects.equals(queryString, options.queryString)
+                    && Objects.equals(category, options.category)
+                    && Objects.equals(targetPlatform, options.targetPlatform)
+                    && Objects.equals(sortOrder, options.sortOrder)
+                    && Objects.equals(sortBy, options.sortBy)
+                    && Arrays.equals(namespacesToExclude, options.namespacesToExclude);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(queryString, category, targetPlatform, requestedSize, requestedOffset,
-                    sortOrder, sortBy, includeAllVersions);
+            int result = Objects.hash(queryString, category, targetPlatform, requestedSize, requestedOffset, sortOrder, sortBy, includeAllVersions);
+            result = 31 * result + Arrays.hashCode(namespacesToExclude);
+            return result;
         }
     }
-
-
 }

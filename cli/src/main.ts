@@ -11,6 +11,7 @@
 import * as commander from 'commander';
 import * as leven from 'leven';
 import { createNamespace } from './create-namespace';
+import { verifyPat } from './verify-pat';
 import { publish } from './publish';
 import { handleError } from './util';
 import { getExtension } from './get';
@@ -33,6 +34,14 @@ module.exports = function (argv: string[]): void {
                 .catch(handleError(program.debug));
         });
 
+    const verifyTokenCmd = program.command('verify-pat [namespace]');
+    verifyTokenCmd.description('Verify that a personal access token can publish to a namespace')
+        .action((namespace?: string) => {
+            const { registryUrl, pat } = program.opts();
+            verifyPat({ namespace, registryUrl, pat })
+                .catch(handleError(program.debug));
+        });
+
     const publishCmd = program.command('publish [extension.vsix]');
     publishCmd.description('Publish an extension, packaging it first if necessary.')
         .option('-t, --target <targets...>', 'Target architectures')
@@ -41,7 +50,9 @@ module.exports = function (argv: string[]): void {
         .option('--baseImagesUrl <url>', 'Prepend all relative image links in README.md with this URL.')
         .option('--yarn', 'Use yarn instead of npm while packing extension files.')
         .option('--pre-release', 'Mark this package as a pre-release')
-        .action((extensionFile: string, { target, packagePath, baseContentUrl, baseImagesUrl, yarn, preRelease }) => {
+        .option('--no-dependencies', 'Disable dependency detection via npm or yarn')
+        .option('--skip-duplicate', 'Fail silently if version already exists on the marketplace')
+        .action((extensionFile: string, { target, packagePath, baseContentUrl, baseImagesUrl, yarn, preRelease, dependencies, skipDuplicate }) => {
             if (extensionFile !== undefined && packagePath !== undefined) {
                 console.error('\u274c  Please specify either a package file or a package path, but not both.\n');
                 publishCmd.help();
@@ -57,11 +68,23 @@ module.exports = function (argv: string[]): void {
             if (extensionFile !== undefined && yarn !== undefined)
                 console.warn("Ignoring option '--yarn' for prepackaged extension.");
             const { registryUrl, pat } = program.opts();
-            publish({ extensionFile, registryUrl, pat, targets: typeof target === 'string' ? [target] : target, packagePath: typeof packagePath === 'string' ? [packagePath] : packagePath, baseContentUrl, baseImagesUrl, yarn, preRelease })
-                .catch(handleError(program.debug,
-                    'See the documentation for more information:\n'
-                    + 'https://github.com/eclipse/openvsx/wiki/Publishing-Extensions'
-                ));
+            publish({ extensionFile, registryUrl, pat, targets: typeof target === 'string' ? [target] : target, packagePath: typeof packagePath === 'string' ? [packagePath] : packagePath, baseContentUrl, baseImagesUrl, yarn, preRelease, dependencies, skipDuplicate })
+                .then(results => {
+                    const reasons = results.filter(result => result.status === 'rejected')
+                        .map(result => result as PromiseRejectedResult)
+                        .map(rejectedResult => rejectedResult.reason);
+
+                    if (reasons.length > 0) {
+                        const message = 'See the documentation for more information:\n'
+                        + 'https://github.com/eclipse/openvsx/wiki/Publishing-Extensions';
+                        const errorHandler = handleError(program.debug, message, false);
+                        for (const reason of reasons) {
+                            errorHandler(reason);
+                        }
+
+                        process.exit(1);
+                    }
+                });
         });
 
     const getCmd = program.command('get <namespace.extension>');

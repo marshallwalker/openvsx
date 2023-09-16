@@ -9,10 +9,19 @@
  ********************************************************************************/
 package org.eclipse.openvsx.web;
 
-import java.net.URI;
-import java.time.format.DateTimeFormatter;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
+import org.eclipse.openvsx.repositories.RepositoryService;
+import org.eclipse.openvsx.util.UrlUtil;
+import org.eclipse.openvsx.util.VersionService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -21,22 +30,9 @@ import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-
-import com.google.common.base.Strings;
-
-import org.apache.commons.lang3.ArrayUtils;
-import org.eclipse.openvsx.entities.ExtensionVersion;
-import org.eclipse.openvsx.repositories.RepositoryService;
-import org.eclipse.openvsx.util.TargetPlatform;
-import org.eclipse.openvsx.util.UrlUtil;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.CacheControl;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import java.net.URI;
+import java.time.format.DateTimeFormatter;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 public class SitemapController {
@@ -45,6 +41,9 @@ public class SitemapController {
 
     @Autowired
     RepositoryService repositories;
+
+    @Autowired
+    VersionService versions;
 
     @Value("${ovsx.webui.url:}")
     String webuiUrl;
@@ -59,26 +58,17 @@ public class SitemapController {
         var baseUrl = getBaseUrl();
         var timestampFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
         repositories.findAllActiveExtensions().forEach(extension -> {
-            var targetPlatforms = extension.getVersions().stream()
-                    .map(ExtensionVersion::getTargetPlatform)
-                    .distinct()
-                    .collect(Collectors.toList());
+            var entry = document.createElement("url");
+            var loc = document.createElement("loc");
+            var namespaceName = extension.getNamespace().getName();
+            loc.setTextContent(UrlUtil.createApiUrl(baseUrl, "extension", namespaceName, extension.getName()));
+            entry.appendChild(loc);
 
-            for(var targetPlatform : targetPlatforms) {
-                var entry = document.createElement("url");
-                var loc = document.createElement("loc");
-                var segments = new String[]{ "extension", extension.getNamespace().getName(), extension.getName() };
-                if(!TargetPlatform.isUniversal(targetPlatform)) {
-                    segments = ArrayUtils.add(segments, targetPlatform);
-                }
-
-                loc.setTextContent(UrlUtil.createApiUrl(baseUrl, segments));
-                entry.appendChild(loc);
-                var lastmod = document.createElement("lastmod");
-                lastmod.setTextContent(extension.getLatest(targetPlatform, true).getTimestamp().format(timestampFormatter));
-                entry.appendChild(lastmod);
-                urlset.appendChild(entry);
-            }
+            var lastmod = document.createElement("lastmod");
+            var latest = versions.getLatestTrxn(extension, null, false, true);
+            lastmod.setTextContent(latest.getTimestamp().format(timestampFormatter));
+            entry.appendChild(lastmod);
+            urlset.appendChild(entry);
         });
 
         StreamingResponseBody stream = out -> {
@@ -94,11 +84,12 @@ public class SitemapController {
         };
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.maxAge(1, TimeUnit.DAYS).cachePublic())
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_XML_VALUE)
                 .body(stream);
     }
 
     private String getBaseUrl() {
-        if (Strings.isNullOrEmpty(webuiUrl))
+        if (StringUtils.isEmpty(webuiUrl))
             return UrlUtil.getBaseUrl();
         else if (URI.create(webuiUrl).isAbsolute())
             return webuiUrl;

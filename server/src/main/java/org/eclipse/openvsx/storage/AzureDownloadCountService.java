@@ -16,37 +16,33 @@ import com.azure.storage.blob.BlobContainerClientBuilder;
 import com.azure.storage.blob.models.BlobItem;
 import com.azure.storage.blob.models.BlobListDetails;
 import com.azure.storage.blob.models.ListBlobsOptions;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Strings;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
-import org.eclipse.openvsx.entities.AzureDownloadCountProcessedItem;
-import org.eclipse.openvsx.repositories.RepositoryService;
-import org.eclipse.openvsx.search.SearchUtilService;
+import org.apache.commons.lang3.StringUtils;
+import org.eclipse.openvsx.util.TempFile;
+import org.jobrunr.jobs.annotations.Job;
+import org.jobrunr.spring.annotations.Recurring;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.TransactionException;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StopWatch;
 import org.springframework.web.util.UriUtils;
 
-import javax.persistence.EntityManager;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
-
-import static org.eclipse.openvsx.entities.FileResource.STORAGE_AZURE;
+import java.util.stream.Collectors;
 
 /**
  * Pulls logs from Azure Blob Storage, extracts downloads from the logs
@@ -58,19 +54,7 @@ public class AzureDownloadCountService {
     protected final Logger logger = LoggerFactory.getLogger(AzureDownloadCountService.class);
 
     @Autowired
-    TransactionTemplate transactions;
-
-    @Autowired
-    EntityManager entityManager;
-
-    @Autowired
-    RepositoryService repositories;
-
-    @Autowired
-    StorageUtilService storageUtil;
-
-    @Autowired
-    SearchUtilService search;
+    AzureDownloadCountProcessor processor;
 
     @Value("${ovsx.logs.azure.sas-token:}")
     String sasToken;
@@ -95,8 +79,8 @@ public class AzureDownloadCountService {
      * Indicates whether the download service is enabled by application config.
      */
     public boolean isEnabled() {
-        var logsEnabled = !Strings.isNullOrEmpty(logsServiceEndpoint);
-        var storageEnabled = !Strings.isNullOrEmpty(storageServiceEndpoint);
+        var logsEnabled = !StringUtils.isEmpty(logsServiceEndpoint);
+        var storageEnabled = !StringUtils.isEmpty(storageServiceEndpoint);
         if(logsEnabled && !storageEnabled) {
             logger.warn("The ovsx.storage.azure.service-endpoint value must be set to enable AzureDownloadCountService");
         }
@@ -107,13 +91,15 @@ public class AzureDownloadCountService {
     /**
      * Task scheduled once per hour to pull logs from Azure Blob Storage and update extension download counts.
      */
-    @Scheduled(cron = "0 5 * * * *", zone = "UTC")
-    @SchedulerLock(name = "updateDownloadCounts", lockAtLeastFor = "5m", lockAtMostFor = "55m")
+    @Job(name = "Update Download Counts", retries = 0)
+    @Recurring(id = "update-download-counts", cron = "0 5 * * * *", zoneId = "UTC")
     public void updateDownloadCounts() {
         if (!isEnabled()) {
             return;
         }
 
+        logger.info(">> updateDownloadCounts");
+        var maxExecutionTime = LocalDateTime.now().withMinute(55);
         var blobs = listBlobs();
         var iterableByPage = blobs.iterableByPage();
 
@@ -124,76 +110,85 @@ public class AzureDownloadCountService {
             if(iterator.hasNext()) {
                 response = iterator.next();
                 var blobNames = getBlobNames(response.getValue());
-                blobNames.removeAll(repositories.findAllSucceededAzureDownloadCountProcessedItemsByNameIn(blobNames));
+                blobNames.removeAll(processor.processedItems(blobNames));
                 for (var name : blobNames) {
-                    try {
-                        transactions.executeWithoutResult(status -> {
-                            var processedItem = new AzureDownloadCountProcessedItem();
-                            processedItem.setName(name);
-                            processedItem.setProcessedOn(LocalDateTime.now());
-                            entityManager.persist(processedItem);
-
-                            stopWatch.start();
-                            try {
-                                transactions.executeWithoutResult(s -> processBlobItem(name));
-                                processedItem.setSuccess(true);
-                            } catch (Exception e) {
-                                logger.error("Failed to process BlobItem: " + name, e);
-                            }
-
-                            stopWatch.stop();
-                            processedItem.setExecutionTime((int) stopWatch.getLastTaskTimeMillis());
-                        });
-                    } catch(TransactionException e) {
-                        logger.error("Transaction failed", e);
+                    if(LocalDateTime.now().isAfter(maxExecutionTime)) {
+                        var nextJobRunTime = LocalDateTime.now().plusHours(1).withMinute(5);
+                        logger.info("Failed to process all download counts within timeslot, next job run is at {}", nextJobRunTime);
+                        logger.info("<< updateDownloadCounts");
+                        return;
                     }
+
+                    var processedOn = LocalDateTime.now();
+                    var success = false;
+                    stopWatch.start();
+                    try {
+                        var files = processBlobItem(name);
+                        if(!files.isEmpty()) {
+                            var extensionDownloads = processor.processDownloadCounts(files);
+                            var updatedExtensions = processor.increaseDownloadCounts(extensionDownloads);
+                            processor.evictCaches(updatedExtensions);
+                            processor.updateSearchEntries(updatedExtensions);
+                        }
+
+                        success = true;
+                    } catch (Exception e) {
+                        logger.error("Failed to process BlobItem: " + name, e);
+                    }
+
+                    stopWatch.stop();
+                    var executionTime = (int) stopWatch.getLastTaskTimeMillis();
+                    processor.persistProcessedItem(name, processedOn, executionTime, success);
                 }
             }
 
             var continuationToken = response != null ? response.getContinuationToken() : "";
-            iterableByPage = !Strings.isNullOrEmpty(continuationToken) ? blobs.iterableByPage(continuationToken) : null;
+            iterableByPage = !StringUtils.isEmpty(continuationToken) ? blobs.iterableByPage(continuationToken) : null;
         }
+
+        logger.info("<< updateDownloadCounts");
     }
 
-    private void processBlobItem(String blobName) {
-        try (var outputStream = new ByteArrayOutputStream()) {
-            getContainerClient().getBlobClient(blobName).download(outputStream);
-            var bytes = outputStream.toByteArray();
-
-            var files = new HashMap<String, List<LocalDateTime>>();
-            var jsonObjects = new String(bytes).split("\n");
-            for (var jsonObject : jsonObjects) {
-                var node = getObjectMapper().readTree(jsonObject);
-                var operationName = node.get("operationName").asText();
-                var statusCode = node.get("statusCode").asInt();
-
-                String[] pathParams = null;
-                if (operationName.equals("GetBlob") && statusCode == 200) {
-                    var blobUri = URI.create(node.get("uri").asText());
-                    pathParams = blobUri.getPath().split("/");
-                }
-
-                var matchesStorageBlobContainer = false;
-                if(pathParams != null) {
-                    var container = pathParams[1];
-                    matchesStorageBlobContainer = storageBlobContainer.equals(container);
-                }
-                if(matchesStorageBlobContainer) {
-                    var fileName = UriUtils.decode(pathParams[pathParams.length - 1], StandardCharsets.UTF_8).toUpperCase();
-                    var timestamps = files.getOrDefault(fileName, new ArrayList<>());
-                    timestamps.add(LocalDateTime.parse(node.get("time").asText(), DateTimeFormatter.ISO_ZONED_DATE_TIME));
-                    files.put(fileName, timestamps);
-                }
-            }
-
-            var fileResources = repositories.findDownloadsByStorageTypeAndName(STORAGE_AZURE, files.keySet());
-            for (var fileResource : fileResources) {
-                var timestamps = files.get(fileResource.getName().toUpperCase());
-                storageUtil.increaseDownloadCount(fileResource.getExtension(), fileResource, timestamps);
-            }
+    private Map<String, List<LocalDateTime>> processBlobItem(String blobName) {
+        try (
+                var downloadsTempFile = downloadBlobItem(blobName);
+                var reader = Files.newBufferedReader(downloadsTempFile.getPath())
+        ) {
+            return reader.lines()
+                    .map(line -> {
+                        try {
+                            return getObjectMapper().readTree(line);
+                        } catch (JsonProcessingException e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .filter(node -> {
+                        var operationName = node.get("operationName").asText();
+                        var statusCode = node.get("statusCode").asInt();
+                        var uri = node.get("uri").asText();
+                        return operationName.equals("GetBlob") && statusCode == 200 && uri.endsWith(".vsix");
+                    }).map(node -> {
+                        var uri = node.get("uri").asText();
+                        var pathParams = uri.substring(storageServiceEndpoint.length()).split("/");
+                        return new AbstractMap.SimpleEntry<>(pathParams, node.get("time").asText());
+                    })
+                    .filter(entry -> storageBlobContainer.equals(entry.getKey()[1]))
+                    .map(entry -> {
+                        var pathParams = entry.getKey();
+                        var fileName = UriUtils.decode(pathParams[pathParams.length - 1], StandardCharsets.UTF_8).toUpperCase();
+                        var time = LocalDateTime.parse(entry.getValue(), DateTimeFormatter.ISO_ZONED_DATE_TIME);
+                        return new AbstractMap.SimpleEntry<>(fileName, time);
+                    })
+                    .collect(Collectors.groupingBy(Map.Entry::getKey, Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private TempFile downloadBlobItem(String blobName) throws IOException {
+        var downloadsTempFile = new TempFile("azure-downloads-", ".json");
+        getContainerClient().getBlobClient(blobName).downloadToFile(downloadsTempFile.getPath().toAbsolutePath().toString(), true);
+        return downloadsTempFile;
     }
 
     private List<String> getBlobNames(List<BlobItem> items) {

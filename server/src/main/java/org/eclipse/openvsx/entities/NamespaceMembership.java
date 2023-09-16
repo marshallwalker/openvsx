@@ -9,23 +9,22 @@
  ********************************************************************************/
 package org.eclipse.openvsx.entities;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
+import jakarta.persistence.*;
 
 import org.eclipse.openvsx.json.NamespaceMembershipJson;
 
+import java.io.Serializable;
+import java.util.Objects;
+
 @Entity
-public class NamespaceMembership {
+public class NamespaceMembership implements Serializable {
 
     public static final String ROLE_OWNER = "owner";
     public static final String ROLE_CONTRIBUTOR = "contributor";
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(generator = "namespaceMembershipSeq")
+    @SequenceGenerator(name = "namespaceMembershipSeq", sequenceName = "namespace_membership_seq")
     long id;
 
     @ManyToOne
@@ -79,4 +78,19 @@ public class NamespaceMembership {
         this.role = role;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        NamespaceMembership that = (NamespaceMembership) o;
+        return id == that.id
+                && Objects.equals(namespace, that.namespace)
+                && Objects.equals(user, that.user)
+                && Objects.equals(role, that.role);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, namespace, user, role);
+    }
 }

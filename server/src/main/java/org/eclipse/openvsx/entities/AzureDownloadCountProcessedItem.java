@@ -9,14 +9,15 @@
  ********************************************************************************/
 package org.eclipse.openvsx.entities;
 
-import javax.persistence.*;
+import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
 public class AzureDownloadCountProcessedItem {
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(generator = "azureDownloadCountProcessedItemSeq")
+    @SequenceGenerator(name = "azureDownloadCountProcessedItemSeq", sequenceName = "azure_download_count_processed_item_seq")
     long id;
 
     String name;

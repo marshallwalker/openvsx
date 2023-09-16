@@ -8,22 +8,28 @@
  * SPDX-License-Identifier: EPL-2.0
  ********************************************************************************/
 
-import React, { FunctionComponent, useState, useContext } from 'react';
+import React, { FunctionComponent, useState, useContext, useEffect } from 'react';
 import {
     Button, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Typography, Link
-} from '@material-ui/core';
+} from '@mui/material';
 import { createAbsoluteURL } from '../../utils';
 import { ButtonWithProgress } from '../../components/button-with-progress';
 import { PublisherInfo, isError } from '../../extension-registry-types';
 import { MainContext } from '../../context';
 import { UpdateContext } from './publisher-admin';
 
-export const PublisherRevokeDialog: FunctionComponent<PublisherRevokeDialog.Props> = props => {
+export const PublisherRevokeDialog: FunctionComponent<PublisherRevokeDialogProps> = props => {
     const { user, service, handleError } = useContext(MainContext);
     const updateContext = useContext(UpdateContext);
 
     const [dialogOpen, setDialogOpen] = useState(false);
     const [working, setWorking] = useState(false);
+    const abortController = new AbortController();
+    useEffect(() => {
+        return () => {
+            abortController.abort();
+        };
+    }, []);
 
     if (props.publisherInfo.user.publisherAgreement
             && !(user && user.additionalLogins && user.additionalLogins.find(login => login.provider === 'eclipse'))) {
@@ -39,7 +45,7 @@ export const PublisherRevokeDialog: FunctionComponent<PublisherRevokeDialog.Prop
         try {
             setWorking(true);
             const user = props.publisherInfo.user;
-            const result = await service.admin.revokePublisherContributions(user.provider!, user.loginName);
+            const result = await service.admin.revokePublisherContributions(abortController, user.provider!, user.loginName);
             if (isError(result)) {
                 throw result;
             }
@@ -109,6 +115,7 @@ export const PublisherRevokeDialog: FunctionComponent<PublisherRevokeDialog.Prop
                 </Button>
                 <ButtonWithProgress
                     autoFocus
+                    sx={{ ml: 1 }}
                     working={working}
                     onClick={doRevoke} >
                     Revoke Contributions
@@ -118,8 +125,6 @@ export const PublisherRevokeDialog: FunctionComponent<PublisherRevokeDialog.Prop
     </>;
 };
 
-export namespace PublisherRevokeDialog {
-    export interface Props {
-        publisherInfo: PublisherInfo;
-    }
+export interface PublisherRevokeDialogProps {
+    publisherInfo: PublisherInfo;
 }

@@ -1,11 +1,11 @@
 {
     "compilerOptions": {
-        "target": "es6",
+        "target": "es2020",
         "module": "commonjs",
         "sourceMap": true,
         "declaration": true,
         "declarationMap": true,
-        "noImplicitAny": true,
+        "noImplicitAny": false,
         "noImplicitThis": true,
         "noImplicitReturns": true,
         "noUnusedLocals": true,

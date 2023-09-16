@@ -17,7 +17,7 @@ import org.jooq.ForeignKey;
 import org.jooq.Index;
 import org.jooq.Name;
 import org.jooq.Record;
-import org.jooq.Row9;
+import org.jooq.Row10;
 import org.jooq.Schema;
 import org.jooq.Table;
 import org.jooq.TableField;
@@ -94,6 +94,11 @@ public class Extension extends TableImpl<ExtensionRecord> {
      */
     public final TableField<ExtensionRecord, LocalDateTime> LAST_UPDATED_DATE = createField(DSL.name("last_updated_date"), SQLDataType.LOCALDATETIME(6), this, "");
 
+    /**
+     * The column <code>public.extension.review_count</code>.
+     */
+    public final TableField<ExtensionRecord, Long> REVIEW_COUNT = createField(DSL.name("review_count"), SQLDataType.BIGINT, this, "");
+
     private Extension(Name alias, Table<ExtensionRecord> aliased) {
         this(alias, aliased, null);
     }
@@ -152,8 +157,13 @@ public class Extension extends TableImpl<ExtensionRecord> {
         return Arrays.<ForeignKey<ExtensionRecord, ?>>asList(Keys.EXTENSION__FK64IMD3NRJ67D50TPKJS94NGMN);
     }
 
+    private transient Namespace _namespace;
+
     public Namespace namespace() {
-        return new Namespace(this, Keys.EXTENSION__FK64IMD3NRJ67D50TPKJS94NGMN);
+        if (_namespace == null)
+            _namespace = new Namespace(this, Keys.EXTENSION__FK64IMD3NRJ67D50TPKJS94NGMN);
+
+        return _namespace;
     }
 
     @Override
@@ -183,11 +193,11 @@ public class Extension extends TableImpl<ExtensionRecord> {
     }
 
     // -------------------------------------------------------------------------
-    // Row9 type methods
+    // Row10 type methods
     // -------------------------------------------------------------------------
 
     @Override
-    public Row9<Long, Double, Integer, String, Long, String, Boolean, LocalDateTime, LocalDateTime> fieldsRow() {
-        return (Row9) super.fieldsRow();
+    public Row10<Long, Double, Integer, String, Long, String, Boolean, LocalDateTime, LocalDateTime, Long> fieldsRow() {
+        return (Row10) super.fieldsRow();
     }
 }

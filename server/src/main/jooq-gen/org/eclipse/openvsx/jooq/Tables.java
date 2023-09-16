@@ -7,6 +7,10 @@ package org.eclipse.openvsx.jooq;
 import org.eclipse.openvsx.jooq.tables.AdminStatistics;
 import org.eclipse.openvsx.jooq.tables.AdminStatisticsExtensionsByRating;
 import org.eclipse.openvsx.jooq.tables.AdminStatisticsPublishersByExtensionsPublished;
+import org.eclipse.openvsx.jooq.tables.AdminStatisticsTopMostActivePublishingUsers;
+import org.eclipse.openvsx.jooq.tables.AdminStatisticsTopMostDownloadedExtensions;
+import org.eclipse.openvsx.jooq.tables.AdminStatisticsTopNamespaceExtensionVersions;
+import org.eclipse.openvsx.jooq.tables.AdminStatisticsTopNamespaceExtensions;
 import org.eclipse.openvsx.jooq.tables.AzureDownloadCountProcessedItem;
 import org.eclipse.openvsx.jooq.tables.Download;
 import org.eclipse.openvsx.jooq.tables.EntityActiveState;
@@ -15,11 +19,20 @@ import org.eclipse.openvsx.jooq.tables.ExtensionReview;
 import org.eclipse.openvsx.jooq.tables.ExtensionVersion;
 import org.eclipse.openvsx.jooq.tables.FileResource;
 import org.eclipse.openvsx.jooq.tables.FlywaySchemaHistory;
+import org.eclipse.openvsx.jooq.tables.JobrunrBackgroundjobservers;
+import org.eclipse.openvsx.jooq.tables.JobrunrJobs;
+import org.eclipse.openvsx.jooq.tables.JobrunrJobsStats;
+import org.eclipse.openvsx.jooq.tables.JobrunrMetadata;
+import org.eclipse.openvsx.jooq.tables.JobrunrMigrations;
+import org.eclipse.openvsx.jooq.tables.JobrunrRecurringJobs;
+import org.eclipse.openvsx.jooq.tables.MigrationItem;
 import org.eclipse.openvsx.jooq.tables.Namespace;
 import org.eclipse.openvsx.jooq.tables.NamespaceMembership;
+import org.eclipse.openvsx.jooq.tables.NamespaceSocialLinks;
 import org.eclipse.openvsx.jooq.tables.PersistedLog;
 import org.eclipse.openvsx.jooq.tables.PersonalAccessToken;
 import org.eclipse.openvsx.jooq.tables.Shedlock;
+import org.eclipse.openvsx.jooq.tables.SignatureKeyPair;
 import org.eclipse.openvsx.jooq.tables.SpringSession;
 import org.eclipse.openvsx.jooq.tables.SpringSessionAttributes;
 import org.eclipse.openvsx.jooq.tables.UserData;
@@ -45,6 +58,26 @@ public class Tables {
      * The table <code>public.admin_statistics_publishers_by_extensions_published</code>.
      */
     public static final AdminStatisticsPublishersByExtensionsPublished ADMIN_STATISTICS_PUBLISHERS_BY_EXTENSIONS_PUBLISHED = AdminStatisticsPublishersByExtensionsPublished.ADMIN_STATISTICS_PUBLISHERS_BY_EXTENSIONS_PUBLISHED;
+
+    /**
+     * The table <code>public.admin_statistics_top_most_active_publishing_users</code>.
+     */
+    public static final AdminStatisticsTopMostActivePublishingUsers ADMIN_STATISTICS_TOP_MOST_ACTIVE_PUBLISHING_USERS = AdminStatisticsTopMostActivePublishingUsers.ADMIN_STATISTICS_TOP_MOST_ACTIVE_PUBLISHING_USERS;
+
+    /**
+     * The table <code>public.admin_statistics_top_most_downloaded_extensions</code>.
+     */
+    public static final AdminStatisticsTopMostDownloadedExtensions ADMIN_STATISTICS_TOP_MOST_DOWNLOADED_EXTENSIONS = AdminStatisticsTopMostDownloadedExtensions.ADMIN_STATISTICS_TOP_MOST_DOWNLOADED_EXTENSIONS;
+
+    /**
+     * The table <code>public.admin_statistics_top_namespace_extension_versions</code>.
+     */
+    public static final AdminStatisticsTopNamespaceExtensionVersions ADMIN_STATISTICS_TOP_NAMESPACE_EXTENSION_VERSIONS = AdminStatisticsTopNamespaceExtensionVersions.ADMIN_STATISTICS_TOP_NAMESPACE_EXTENSION_VERSIONS;
+
+    /**
+     * The table <code>public.admin_statistics_top_namespace_extensions</code>.
+     */
+    public static final AdminStatisticsTopNamespaceExtensions ADMIN_STATISTICS_TOP_NAMESPACE_EXTENSIONS = AdminStatisticsTopNamespaceExtensions.ADMIN_STATISTICS_TOP_NAMESPACE_EXTENSIONS;
 
     /**
      * The table <code>public.azure_download_count_processed_item</code>.
@@ -87,6 +120,41 @@ public class Tables {
     public static final FlywaySchemaHistory FLYWAY_SCHEMA_HISTORY = FlywaySchemaHistory.FLYWAY_SCHEMA_HISTORY;
 
     /**
+     * The table <code>public.jobrunr_backgroundjobservers</code>.
+     */
+    public static final JobrunrBackgroundjobservers JOBRUNR_BACKGROUNDJOBSERVERS = JobrunrBackgroundjobservers.JOBRUNR_BACKGROUNDJOBSERVERS;
+
+    /**
+     * The table <code>public.jobrunr_jobs</code>.
+     */
+    public static final JobrunrJobs JOBRUNR_JOBS = JobrunrJobs.JOBRUNR_JOBS;
+
+    /**
+     * The table <code>public.jobrunr_jobs_stats</code>.
+     */
+    public static final JobrunrJobsStats JOBRUNR_JOBS_STATS = JobrunrJobsStats.JOBRUNR_JOBS_STATS;
+
+    /**
+     * The table <code>public.jobrunr_metadata</code>.
+     */
+    public static final JobrunrMetadata JOBRUNR_METADATA = JobrunrMetadata.JOBRUNR_METADATA;
+
+    /**
+     * The table <code>public.jobrunr_migrations</code>.
+     */
+    public static final JobrunrMigrations JOBRUNR_MIGRATIONS = JobrunrMigrations.JOBRUNR_MIGRATIONS;
+
+    /**
+     * The table <code>public.jobrunr_recurring_jobs</code>.
+     */
+    public static final JobrunrRecurringJobs JOBRUNR_RECURRING_JOBS = JobrunrRecurringJobs.JOBRUNR_RECURRING_JOBS;
+
+    /**
+     * The table <code>public.migration_item</code>.
+     */
+    public static final MigrationItem MIGRATION_ITEM = MigrationItem.MIGRATION_ITEM;
+
+    /**
      * The table <code>public.namespace</code>.
      */
     public static final Namespace NAMESPACE = Namespace.NAMESPACE;
@@ -95,6 +163,11 @@ public class Tables {
      * The table <code>public.namespace_membership</code>.
      */
     public static final NamespaceMembership NAMESPACE_MEMBERSHIP = NamespaceMembership.NAMESPACE_MEMBERSHIP;
+
+    /**
+     * The table <code>public.namespace_social_links</code>.
+     */
+    public static final NamespaceSocialLinks NAMESPACE_SOCIAL_LINKS = NamespaceSocialLinks.NAMESPACE_SOCIAL_LINKS;
 
     /**
      * The table <code>public.persisted_log</code>.
@@ -110,6 +183,11 @@ public class Tables {
      * The table <code>public.shedlock</code>.
      */
     public static final Shedlock SHEDLOCK = Shedlock.SHEDLOCK;
+
+    /**
+     * The table <code>public.signature_key_pair</code>.
+     */
+    public static final SignatureKeyPair SIGNATURE_KEY_PAIR = SignatureKeyPair.SIGNATURE_KEY_PAIR;
 
     /**
      * The table <code>public.spring_session</code>.

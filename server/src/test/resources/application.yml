@@ -1,7 +1,10 @@
 spring:
+  cache:
+    jcache:
+      config: classpath:ehcache.xml
   datasource:
     driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
-    url: jdbc:tc:postgresql:9.6.8:///test
+    url: jdbc:tc:postgresql:12.7:///test
   jpa:
     properties:
       hibernate:
@@ -21,3 +24,16 @@ spring:
               client-id: dummy-client-id
               client-secret: dummy-client-secret
 
+org:
+  jobrunr:
+    job-scheduler:
+      enabled: true
+    background-job-server:
+      enabled: true
+      worker-count: 1
+    dashboard:
+      enabled: false
+    database:
+      type: sql
+    miscellaneous:
+      allow-anonymous-data-usage: false

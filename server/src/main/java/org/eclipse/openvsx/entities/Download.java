@@ -9,14 +9,15 @@
  * ****************************************************************************** */
 package org.eclipse.openvsx.entities;
 
-import javax.persistence.*;
+import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
 public class Download {
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(generator = "downloadSeq")
+    @SequenceGenerator(name = "downloadSeq", sequenceName = "download_seq")
     long id;
 
     @Column(name = "file_resource_id_not_fk")

@@ -8,11 +8,13 @@
  * SPDX-License-Identifier: EPL-2.0
  ********************************************************************************/
 
-import * as React from 'react';
-import { makeStyles } from '@material-ui/styles';
-import { Link, Typography, Theme, Box } from '@material-ui/core';
-import { Link as RouteLink, Route } from 'react-router-dom';
-import GitHubIcon from '@material-ui/icons/GitHub';
+import React, { FunctionComponent, ReactNode } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { styled, Theme } from '@mui/material/styles';
+import { Link, Typography, Box } from '@mui/material';
+import { Link as RouteLink, Route, useParams } from 'react-router-dom';
+import GitHubIcon from '@mui/icons-material/GitHub';
+import { Extension, NamespaceDetails } from '../extension-registry-types';
 import { PageSettings } from '../page-settings';
 import { ExtensionListRoutes } from '../pages/extension-list/extension-list-container';
 import { DefaultMenuContent, MobileMenuContent } from './menu-content';
@@ -20,74 +22,80 @@ import OpenVSXLogo from './openvsx-registry-logo';
 import About from './about';
 import { createAbsoluteURL } from '../utils';
 
-export default function createPageSettings(theme: Theme, prefersDarkMode: boolean, serverUrl: string): PageSettings {
-    const toolbarStyle = makeStyles({
-        logo: {
-            width: 'auto',
-            height: '40px',
-            marginTop: '8px'
-        }
-    });
-    const toolbarContent: React.FunctionComponent = () =>
+export default function createPageSettings(prefersDarkMode: boolean, serverUrl: string): PageSettings {
+    const toolbarContent: FunctionComponent = () =>
         <RouteLink to={ExtensionListRoutes.MAIN} aria-label={`Home - Open VSX Registry`}>
-            <OpenVSXLogo prefersDarkMode={prefersDarkMode} className={toolbarStyle().logo} />
+            <OpenVSXLogo width='auto' height='40px' marginTop='8px' prefersDarkMode={prefersDarkMode} />
         </RouteLink>;
 
-    const footerStyle = makeStyles({
-        wrapper: {
+    const link = ({ theme }: { theme: Theme }) => ({
+        color: theme.palette.text.primary,
+        textDecoration: 'none',
+        '&:hover': {
+            color: theme.palette.secondary.main,
+            textDecoration: 'none'
+        }
+    });
+
+    const StyledRouteLink = styled(RouteLink)(link);
+    const footerContent: FunctionComponent<{ expanded: boolean }> = () =>
+        <Box sx={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            [theme.breakpoints.down('sm')]: {
-                flexDirection: 'column'
-            }
-        },
-        link: {
-            color: theme.palette.text.primary,
-            textDecoration: 'none',
-            '&:hover': {
-                color: theme.palette.secondary.main,
-                textDecoration: 'none'
-            }
-        },
-        repositoryLink: {
-            display: 'flex',
-            alignItems: 'center',
-            fontSize: '1.1rem',
-            [theme.breakpoints.down('sm')]: {
-                marginBottom: theme.spacing(1)
-            }
-        }
-    });
-
-    const footerContent: React.FunctionComponent<{ expanded: boolean }> = () =>
-        <Box className={footerStyle().wrapper}>
+            flexDirection: { xs: 'column', sm: 'column', md: 'row', lg: 'row', xl: 'row' }
+        }}>
             <Link
                 target='_blank'
                 href='https://github.com/eclipse/openvsx'
-                className={`${footerStyle().link} ${footerStyle().repositoryLink}`} >
+                sx={(theme: Theme) => ({
+                    ...link({ theme }),
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: '1.1rem',
+                    mb: { xs: 1, sm: 1, md: 0, lg: 0, xl: 0 }
+                })}
+            >
                 <GitHubIcon />&nbsp;eclipse/openvsx
             </Link>
-            <RouteLink to='/about' className={footerStyle().link}>
+            <StyledRouteLink to='/about'>
                 About This Service
-            </RouteLink>
+            </StyledRouteLink>
         </Box>;
 
-    const searchStyle = makeStyles({
-        typography: {
-            marginBottom: theme.spacing(2),
-            fontWeight: theme.typography.fontWeightLight,
-            letterSpacing: 4,
-            textAlign: 'center'
-        }
-    });
-    const searchHeader: React.FunctionComponent = () =>
-        <Typography variant='h4' classes={{ root: searchStyle().typography }}>
+    const searchHeader: FunctionComponent = () =>
+        <Typography variant='h4' sx={{ mb: 2, fontWeight: 'fontWeightLight', letterSpacing: 4, textAlign: 'center' }}>
             Extensions for VS Code Compatible Editors
         </Typography>;
 
-    const additionalRoutes: React.FunctionComponent = () =>
-        <Route path='/about' render={() => <About />} />;
+    const additionalRoutes: ReactNode = <Route path='/about' element={<About />} />;
+
+    const headTags: FunctionComponent<{title: string}> = (props) => {
+        return <Helmet>
+            <title>{props.title}</title>
+        </Helmet>;
+    };
+
+    const mainHeadTags: FunctionComponent<{pageSettings: PageSettings}> = (props) => {
+        return headTags({ title: props.pageSettings.pageTitle });
+    };
+
+    const extensionHeadTags: FunctionComponent<{extension?: Extension, pageSettings: PageSettings}> = (props) => {
+        const params = useParams();
+        const name = props.extension
+            ? props.extension.displayName || props.extension.name
+            : params.name;
+
+        return headTags({ title: `${name} – ${props.pageSettings.pageTitle}` });
+    };
+
+    const namespaceHeadTags: FunctionComponent<{namespaceDetails?: NamespaceDetails, name: string, pageSettings: PageSettings}> = (props) => {
+        const name = props.namespaceDetails
+            ? props.namespaceDetails.displayName || props.namespaceDetails.name
+            : props.name;
+
+        return headTags({ title: `${name} – ${props.pageSettings.pageTitle}` });
+    };
 
     return {
         pageTitle: 'Open VSX Registry',
@@ -103,7 +111,10 @@ export default function createPageSettings(theme: Theme, prefersDarkMode: boolea
                 }
             },
             searchHeader,
-            additionalRoutes
+            additionalRoutes,
+            mainHeadTags,
+            extensionHeadTags,
+            namespaceHeadTags
         },
         urls: {
             extensionDefaultIcon: '/default-icon.png',

@@ -9,23 +9,23 @@
  ********************************************************************************/
 package org.eclipse.openvsx.entities;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.Id;
-import javax.persistence.OneToOne;
+import jakarta.persistence.*;
 
 @Entity
 public class FileResource {
 
     // Resource types
     public static final String DOWNLOAD = "download";
+    public static final String DOWNLOAD_SHA256 = "sha256";
+    public static final String DOWNLOAD_SIG = "signature";
+    public static final String PUBLIC_KEY = "publicKey";
     public static final String MANIFEST = "manifest";
     public static final String ICON = "icon";
     public static final String README = "readme";
     public static final String LICENSE = "license";
     public static final String CHANGELOG = "changelog";
     public static final String RESOURCE = "resource";
+    public static final String VSIXMANIFEST = "vsixmanifest";
 
     // Storage types
     public static final String STORAGE_DB = "database";
@@ -34,7 +34,8 @@ public class FileResource {
     public static final String STORAGE_AWS = "aws";
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(generator = "fileResourceSeq")
+    @SequenceGenerator(name = "fileResourceSeq", sequenceName = "file_resource_seq")
     long id;
 
     @OneToOne
@@ -45,11 +46,11 @@ public class FileResource {
     @Column(length = 32)
     String type;
 
+    @Basic(fetch = FetchType.LAZY)
     byte[] content;
 
     @Column(length = 32)
     String storageType;
-
 
     public long getId() {
         return id;

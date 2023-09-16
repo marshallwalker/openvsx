@@ -12,8 +12,10 @@ package org.eclipse.openvsx.util;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doReturn;
 
-import javax.servlet.http.HttpServletRequest;
+import java.util.ArrayList;
+import java.util.Collections;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -100,9 +102,49 @@ public class UrlUtilTest {
 
         // XForwarded content
         doReturn("https").when(request).getHeader("X-Forwarded-Proto");
-        doReturn("open-vsx.org").when(request).getHeader("X-Forwarded-Host");
+        var items = new ArrayList<String>();
+        items.add("open-vsx.org");
+        doReturn(Collections.enumeration(items)).when(request).getHeaders("X-Forwarded-Host");
         doReturn("/openvsx").when(request).getHeader("X-Forwarded-Prefix");
         assertThat(UrlUtil.getBaseUrl(request)).isEqualTo("https://open-vsx.org/openvsx/");
-    }    
+    } 
+
+    // Check base URL is using array X-Forwarded-Host headers
+    @Test
+    public void testWithXForwardedHostArray() throws Exception {
+        // basic request
+        doReturn("http").when(request).getScheme();
+        doReturn("localhost").when(request).getServerName();
+        doReturn(8080).when(request).getServerPort();
+        doReturn("/").when(request).getContextPath();
+
+        // XForwarded content
+        doReturn("https").when(request).getHeader("X-Forwarded-Proto");
+        var items = new ArrayList<String>();
+        items.add("open-vsx.org");
+        items.add("foo.com");
+        items.add("bar.com");
+        doReturn(Collections.enumeration(items)).when(request).getHeaders("X-Forwarded-Host");
+        doReturn("/openvsx").when(request).getHeader("X-Forwarded-Prefix");
+        assertThat(UrlUtil.getBaseUrl(request)).isEqualTo("https://open-vsx.org/openvsx/");
+    }
+
+    // Check base URL is using comma separated X-Forwarded-Host headers
+    @Test
+    public void testWithXForwardedHostCommaSeparated() throws Exception {
+        // basic request
+        doReturn("http").when(request).getScheme();
+        doReturn("localhost").when(request).getServerName();
+        doReturn(8080).when(request).getServerPort();
+        doReturn("/").when(request).getContextPath();
+
+        // XForwarded content
+        doReturn("https").when(request).getHeader("X-Forwarded-Proto");
+        var items = new ArrayList<String>();
+        items.add("open-vsx.org, foo.com, bar.com");
+        doReturn(Collections.enumeration(items)).when(request).getHeaders("X-Forwarded-Host");
+        doReturn("/openvsx").when(request).getHeader("X-Forwarded-Prefix");
+        assertThat(UrlUtil.getBaseUrl(request)).isEqualTo("https://open-vsx.org/openvsx/");
+    }
 
 }

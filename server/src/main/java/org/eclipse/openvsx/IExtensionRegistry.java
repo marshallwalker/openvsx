@@ -9,12 +9,7 @@
  ********************************************************************************/
 package org.eclipse.openvsx;
 
-import org.eclipse.openvsx.json.ExtensionJson;
-import org.eclipse.openvsx.json.NamespaceJson;
-import org.eclipse.openvsx.json.QueryParamJson;
-import org.eclipse.openvsx.json.QueryResultJson;
-import org.eclipse.openvsx.json.ReviewListJson;
-import org.eclipse.openvsx.json.SearchResultJson;
+import org.eclipse.openvsx.json.*;
 import org.eclipse.openvsx.search.ISearchService;
 import org.springframework.http.ResponseEntity;
 
@@ -29,12 +24,23 @@ public interface IExtensionRegistry {
 
     ExtensionJson getExtension(String namespace, String extensionName, String targetPlatform, String version);
 
+    VersionsJson getVersions(String namespace, String extension, String targetPlatform, int size, int offset);
+
+    VersionReferencesJson getVersionReferences(String namespace, String extension, String targetPlatform, int size, int offset);
+
     ResponseEntity<byte[]> getFile(String namespace, String extensionName, String targetPlatform, String version, String fileName);
 
     ReviewListJson getReviews(String namespace, String extension);
 
     SearchResultJson search(ISearchService.Options options);
 
-    QueryResultJson query(QueryParamJson param);
+    QueryResultJson query(QueryRequest request);
 
+    QueryResultJson queryV2(QueryRequestV2 request);
+
+    NamespaceDetailsJson getNamespaceDetails(String namespace);
+
+    ResponseEntity<byte[]> getNamespaceLogo(String namespaceName, String fileName);
+
+    String getPublicKey(String publicId);
 }

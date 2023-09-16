@@ -8,29 +8,31 @@
  * SPDX-License-Identifier: EPL-2.0
  ********************************************************************************/
 
-import * as React from 'react';
-import { Extension } from './extension-registry-types';
+import { ComponentType, ReactNode } from 'react';
+import { SxProps, Theme } from '@mui/material/styles';
+import { Extension, NamespaceDetails } from './extension-registry-types';
 import { Cookie } from './utils';
 
 export interface PageSettings {
     pageTitle: string;
     themeType?: 'light' | 'dark';
     elements: {
-        toolbarContent?: React.ComponentType;
-        defaultMenuContent?: React.ComponentType;
-        mobileMenuContent?: React.ComponentType;
+        toolbarContent?: ComponentType;
+        defaultMenuContent?: ComponentType;
+        mobileMenuContent?: ComponentType;
         footer?: {
-            content: React.ComponentType<{ expanded: boolean }>;
+            content: ComponentType<{ expanded: boolean }>;
             props: {
                 footerHeight?: number
             }
         };
-        searchHeader?: React.ComponentType;
-        reportAbuse?: React.ComponentType<{ extension: Extension } & Styleable>;
-        claimNamespace?: React.ComponentType<{ extension: Extension } & Styleable>;
-        additionalRoutes?: React.ComponentType;
+        searchHeader?: ComponentType;
+        reportAbuse?: ComponentType<{ extension: Extension, sx?: SxProps<Theme> }>;
+        claimNamespace?: ComponentType<{ extension: Extension, sx?: SxProps<Theme> }>;
+        downloadTerms?: ComponentType;
+        additionalRoutes?: ReactNode;
         banner?: {
-            content: React.ComponentType;
+            content: ComponentType;
             props?: {
                 dismissButton?: {
                     show?: boolean,
@@ -40,15 +42,14 @@ export interface PageSettings {
                 color?: 'info' | 'warning'
             },
             cookie?: Cookie
-        }
+        };
+        mainHeadTags?: ComponentType<{ pageSettings: PageSettings }>;
+        extensionHeadTags?: ComponentType<{ extension?: Extension, pageSettings: PageSettings }>;
+        namespaceHeadTags?: ComponentType<{ namespaceDetails?: NamespaceDetails, name: string, pageSettings: PageSettings }>;
     };
     urls: {
         extensionDefaultIcon: string;
         namespaceAccessInfo: string;
         publisherAgreement?: string;
-    }
-}
-
-export interface Styleable {
-    className: string;
+    };
 }

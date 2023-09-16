@@ -9,12 +9,13 @@
  ********************************************************************************/
 package org.eclipse.openvsx.util;
 
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-
-import javax.servlet.http.HttpServletRequest;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.openvsx.entities.ExtensionVersion;
 import org.eclipse.openvsx.json.ExtensionJson;
 import org.springframework.util.AntPathMatcher;
@@ -22,6 +23,8 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.util.UriUtils;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 public final class UrlUtil {
 
@@ -90,22 +93,20 @@ public final class UrlUtil {
      * Create a URL pointing to an API path.
      */
     public static String createApiUrl(String baseUrl, String... segments) {
-        var initialCapacity = baseUrl.length() + 8;
-        for (var segment : segments) {
-            initialCapacity += segment.length() + 1;
+        if(Arrays.stream(segments).anyMatch(Objects::isNull)) {
+            return null;
         }
-        var result = new StringBuilder(initialCapacity);
-        result.append(baseUrl);
-        for (var segment : segments) {
-            if (segment == null)
-                return null;
-            if (segment.isEmpty())
-                continue;
-            if (result.length() == 0 || result.charAt(result.length() - 1) != '/')
-                result.append('/');
-            result.append(UriUtils.encodePathSegment(segment, StandardCharsets.UTF_8));
+
+        var path = Arrays.stream(segments)
+                .filter(StringUtils::isNotEmpty)
+                .map(segment -> UriUtils.encodePathSegment(segment, StandardCharsets.UTF_8))
+                .collect(Collectors.joining("/"));
+
+        if (baseUrl.isEmpty() || baseUrl.charAt(baseUrl.length() - 1) != '/') {
+            baseUrl += '/';
         }
-        return result.toString();
+
+        return baseUrl + path;
     }
 
     /**
@@ -139,8 +140,13 @@ public final class UrlUtil {
      * Get the base URL to use for API requests from the current servlet request.
      */
     public static String getBaseUrl() {
-        var requestAttrs = (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
-        return getBaseUrl(requestAttrs.getRequest());
+        try {
+            var requestAttrs = (ServletRequestAttributes) RequestContextHolder.currentRequestAttributes();
+            return getBaseUrl(requestAttrs.getRequest());
+        } catch (IllegalStateException e) {
+            // method is called outside of web request context
+            return "";
+        }
     }
 
     protected static String getBaseUrl(HttpServletRequest request) {
@@ -159,11 +165,19 @@ public final class UrlUtil {
         // Use the host and port from the X-Forwarded-Host header if present
         String host;
         int port;
-        var forwardedHost = request.getHeader("X-Forwarded-Host");
-        if (forwardedHost == null) {
+        var forwardedHostHeadersEnumeration = request.getHeaders("X-Forwarded-Host");
+        if (forwardedHostHeadersEnumeration == null || !forwardedHostHeadersEnumeration.hasMoreElements()) {
             host = request.getServerName();
             port = request.getServerPort();
         } else {
+            // take the first one
+            var forwardedHost = forwardedHostHeadersEnumeration.nextElement();
+
+            // if it's comma separated, take the first one
+            var forwardedHosts = forwardedHost.split(",");
+            if (forwardedHosts.length > 1) {
+                forwardedHost = forwardedHosts[0];
+            }
             int colonIndex = forwardedHost.lastIndexOf(':');
             if (colonIndex > 0) {
                 host = forwardedHost.substring(0, colonIndex);
@@ -215,11 +229,23 @@ public final class UrlUtil {
      */
     public static String extractWildcardPath(HttpServletRequest request, String pattern) {
         String path = (String) request.getAttribute(HandlerMapping.PATH_WITHIN_HANDLER_MAPPING_ATTRIBUTE);
-        if (path == null || pattern == null) {
-            return "";
-        } else {
-            String restOfPath = new AntPathMatcher().extractPathWithinPattern(pattern, path);
-            return restOfPath;
+        return path != null && pattern != null
+                ? new AntPathMatcher().extractPathWithinPattern(pattern, path)
+                : "";
+    }
+
+    public static String getPublicKeyUrl(ExtensionVersion extVersion) {
+        var publicId = extVersion.getSignatureKeyPair().getPublicId();
+        return createApiUrl(getBaseUrl(), "api", "-", "public-key", publicId);
+    }
+
+    public static String createAllVersionsUrl(String namespaceName, String extensionName, String targetPlatform, String versionsSegment) {
+        var segments = new String[]{ "api", namespaceName, extensionName };
+        if(targetPlatform != null) {
+            segments = ArrayUtils.add(segments, targetPlatform);
         }
+
+        segments = ArrayUtils.add(segments, versionsSegment);
+        return createApiUrl(getBaseUrl(), segments);
     }
 }

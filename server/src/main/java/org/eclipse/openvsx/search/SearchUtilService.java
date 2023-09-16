@@ -12,9 +12,11 @@ package org.eclipse.openvsx.search;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.eclipse.openvsx.entities.Extension;
+
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Wrap all available implementations and redirect to the implementation pickup
@@ -52,8 +54,8 @@ public class SearchUtilService implements ISearchService {
 
     }
 
-    public SearchHits<ExtensionSearch> search(ElasticSearchService.Options options, Pageable pageRequest) {
-        return getImplementation().search(options, pageRequest);
+    public SearchHits<ExtensionSearch> search(ElasticSearchService.Options options) {
+        return getImplementation().search(options);
     }
 
     @Override
@@ -62,9 +64,22 @@ public class SearchUtilService implements ISearchService {
     }
 
     @Override
+    public void updateSearchEntries(List<Extension> extensions) {
+        getImplementation().updateSearchEntries(extensions);
+    }
+
+    @Override
+    public void updateSearchEntriesAsync(List<Extension> extensions) {
+        getImplementation().updateSearchEntriesAsync(extensions);
+    }
+
+    @Override
     public void updateSearchEntry(Extension extension) {
         getImplementation().updateSearchEntry(extension);
     }
+
+    @Override
+    public void removeSearchEntries(Collection<Long> ids) { getImplementation().removeSearchEntries(ids); }
 
     @Override
     public void removeSearchEntry(Extension extension) {

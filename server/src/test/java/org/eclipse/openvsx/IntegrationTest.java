@@ -13,8 +13,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 
-import com.google.common.io.ByteStreams;
-
 import org.eclipse.openvsx.json.ExtensionJson;
 import org.eclipse.openvsx.json.NamespaceJson;
 import org.eclipse.openvsx.json.ResultJson;
@@ -24,7 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.web.server.LocalServerPort;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -50,11 +48,13 @@ public class IntegrationTest {
         testService.createUser();
         createNamespace();
         publishExtension();
+
+        // Wait a bit until the publish extension background job has finished
+        Thread.sleep(15000);
         getExtensionMetadata();
 
         // Wait a bit until the new entry has landed in the search index
         Thread.sleep(2000);
-
         searchExtension();
     }
 
@@ -69,10 +69,8 @@ public class IntegrationTest {
     }
 
     private void publishExtension() throws IOException {
-        try (
-            var stream = getClass().getResourceAsStream("vsc-material-theme.vsix");
-        ) {
-            var bytes = ByteStreams.toByteArray(stream);
+        try (var stream = getClass().getResourceAsStream("vsc-material-theme.vsix")) {
+            var bytes = stream.readAllBytes();
             var response = restTemplate.postForEntity(apiCall("/api/-/publish?token={token}"),
                     bytes, ExtensionJson.class, "test_token");
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);

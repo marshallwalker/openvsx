@@ -9,35 +9,44 @@
  ********************************************************************************/
 package org.eclipse.openvsx.search;
 
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-import com.google.common.base.Strings;
-
+import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.mapping.FieldType;
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.QueryBuilders;
+import co.elastic.clients.util.ObjectBuilder;
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.openvsx.entities.Extension;
+import org.eclipse.openvsx.migration.HandlerJobRequest;
 import org.eclipse.openvsx.repositories.RepositoryService;
 import org.eclipse.openvsx.search.RelevanceService.SearchStats;
 import org.eclipse.openvsx.util.ErrorResultException;
 import org.eclipse.openvsx.util.TargetPlatform;
-import org.elasticsearch.common.unit.Fuzziness;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.search.sort.SortBuilders;
-import org.elasticsearch.search.sort.SortOrder;
+import org.jobrunr.scheduling.JobRequestScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationStartedEvent;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
-import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.elasticsearch.client.elc.NativeQueryBuilder;
+import org.springframework.data.elasticsearch.core.*;
 import org.springframework.data.elasticsearch.core.query.IndexQueryBuilder;
-import org.springframework.data.elasticsearch.core.query.NativeSearchQueryBuilder;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StopWatch;
+
+import java.time.ZoneId;
+import java.util.*;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
+
+import static org.eclipse.openvsx.cache.CacheService.CACHE_AVERAGE_REVIEW_RATING;
 
 @Component
 public class ElasticSearchService implements ISearchService {
@@ -54,6 +63,9 @@ public class ElasticSearchService implements ISearchService {
     @Autowired
     RelevanceService relevanceService;
 
+    @Autowired
+    JobRequestScheduler scheduler;
+
     @Value("${ovsx.elasticsearch.enabled:true}")
     boolean enableSearch;
     @Value("${ovsx.elasticsearch.clear-on-start:false}")
@@ -67,6 +79,8 @@ public class ElasticSearchService implements ISearchService {
     double timestampRelevance;
     @Value("${ovsx.elasticsearch.relevance.unverified:0.5}")
     double unverifiedRelevance;
+
+    private Long maxResultWindow;
     
     public boolean isEnabled() {
         return enableSearch;
@@ -79,8 +93,10 @@ public class ElasticSearchService implements ISearchService {
      * not exist yet, it is created and initialized. Otherwise nothing happens.
      */
     @EventListener
-    @Transactional(readOnly = true)
+    @Retryable(DataAccessResourceFailureException.class)
+    @CacheEvict(value = CACHE_AVERAGE_REVIEW_RATING, allEntries = true)
     public void initSearchIndex(ApplicationStartedEvent event) {
+        scheduler.scheduleRecurrently("ElasticSearchUpdateIndex", "0 0 4 * * *", ZoneId.of("UTC"), new HandlerJobRequest<>(ElasticSearchUpdateIndexJobRequestHandler.class));
         if (!isEnabled() || !clearOnStart && searchOperations.indexOps(ExtensionSearch.class).exists()) {
             return;
         }
@@ -92,14 +108,14 @@ public class ElasticSearchService implements ISearchService {
     }
 
     /**
-     * Task scheduled once per day to soft-update the search index. This is necessary
-     * because the relevance of index entries might consider the extension publishing
-     * timestamps in relation to the current time.
+     * Soft-update the search index, because the relevance of index entries
+     * consider the extension publishing timestamps in relation to the current
+     * time or the extension rating.
      */
-    @Scheduled(cron = "0 0 4 * * *", zone = "UTC")
-    @Transactional(readOnly = true)
+    @Retryable(DataAccessResourceFailureException.class)
+    @CacheEvict(value = CACHE_AVERAGE_REVIEW_RATING, allEntries = true)
     public void updateSearchIndex() {
-        if (!isEnabled() || Math.abs(timestampRelevance) < 0.01) {
+        if (!isEnabled()) {
             return;
         }
         var stopWatch = new StopWatch();
@@ -118,6 +134,7 @@ public class ElasticSearchService implements ISearchService {
      * In any case, this method scans all extensions in the database and indexes their
      * relevant metadata.
      */
+    @Retryable(DataAccessResourceFailureException.class)
     public void updateSearchIndex(boolean clear) {
         var locked = false;
         try {
@@ -145,7 +162,7 @@ public class ElasticSearchService implements ISearchService {
             var stats = new SearchStats(repositories);
             var indexQueries = allExtensions.map(extension ->
                 new IndexQueryBuilder()
-                    .withObject(relevanceService.toSearchEntry(extension, stats))
+                    .withObject(relevanceService.toSearchEntryTrxn(extension, stats))
                     .build()
             ).toList();
 
@@ -162,6 +179,33 @@ public class ElasticSearchService implements ISearchService {
         }
     }
 
+    @Async
+    @Retryable(DataAccessResourceFailureException.class)
+    public void updateSearchEntriesAsync(List<Extension> extensions) {
+        updateSearchEntries(extensions);
+    }
+
+    @Retryable(DataAccessResourceFailureException.class)
+    public void updateSearchEntries(List<Extension> extensions) {
+        if (!isEnabled() || extensions.isEmpty()) {
+            return;
+        }
+        try {
+            rwLock.writeLock().lock();
+            var indexOps = searchOperations.indexOps(ExtensionSearch.class);
+            var stats = new SearchStats(repositories);
+            var indexQueries = extensions.stream().map(extension ->
+                    new IndexQueryBuilder()
+                            .withObject(relevanceService.toSearchEntryTrxn(extension, stats))
+                            .build()
+            ).collect(Collectors.toList());
+            searchOperations.bulkIndex(indexQueries, indexOps.getIndexCoordinates());
+        } finally {
+            rwLock.writeLock().unlock();
+        }
+    }
+
+    @Retryable(DataAccessResourceFailureException.class)
     public void updateSearchEntry(Extension extension) {
         if (!isEnabled()) {
             return;
@@ -179,6 +223,19 @@ public class ElasticSearchService implements ISearchService {
         }
     }
 
+    @Retryable(DataAccessResourceFailureException.class)
+    public void removeSearchEntries(Collection<Long> ids) {
+        if (!isEnabled()) {
+            return;
+        }
+
+        var queryBuilder = new NativeQueryBuilder();
+        var query = queryBuilder.withQuery(builder -> builder.ids(idsBuilder -> idsBuilder.values(ids.stream().map(String::valueOf).collect(Collectors.toList())))).build();
+        searchOperations.delete(query, ExtensionSearch.class);
+    }
+
+
+    @Retryable(DataAccessResourceFailureException.class)
     public void removeSearchEntry(Extension extension) {
         if (!isEnabled()) {
             return;
@@ -192,77 +249,143 @@ public class ElasticSearchService implements ISearchService {
         }
     }
 
-    public SearchHits<ExtensionSearch> search(Options options, Pageable pageRequest) {
-        var queryBuilder = new NativeSearchQueryBuilder()
-                .withPageable(pageRequest);
-        if (!Strings.isNullOrEmpty(options.queryString)) {
-            var boolQuery = QueryBuilders.boolQuery();
-
-            boolQuery.should(QueryBuilders.termQuery("extensionId.keyword", options.queryString)).boost(10);
-
-            // Fuzzy matching of search query in multiple fields
-            var multiMatchQuery = QueryBuilders.multiMatchQuery(options.queryString)
-                    .field("name").boost(5)
-                    .field("displayName").boost(5)
-                    .field("tags").boost(3)
-                    .field("namespace").boost(2)
-                    .field("description")
-                    .fuzziness(Fuzziness.AUTO)
-                    .prefixLength(2);
-            boolQuery.should(multiMatchQuery).boost(5);
-
-            // Prefix matching of search query in display name and namespace
-            var prefixString = options.queryString.trim().toLowerCase();
-            var namePrefixQuery = QueryBuilders.prefixQuery("displayName", prefixString);
-            boolQuery.should(namePrefixQuery).boost(2);
-            var namespacePrefixQuery = QueryBuilders.prefixQuery("namespace", prefixString);
-            boolQuery.should(namespacePrefixQuery);
-
-            queryBuilder.withQuery(boolQuery);
+    public SearchHits<ExtensionSearch> search(Options options) {
+        var resultWindow = options.requestedOffset + options.requestedSize;
+        if(resultWindow > getMaxResultWindow()) {
+            return new SearchHitsImpl<>(0, TotalHitsRelation.OFF, 0f, null, null, Collections.emptyList(), null, null);
         }
 
-        if (!Strings.isNullOrEmpty(options.category)) {
-            // Filter by selected category
-            queryBuilder.withFilter(QueryBuilders.matchPhraseQuery("categories", options.category));
-        }
-        if (TargetPlatform.isValid(options.targetPlatform)) {
-            // Filter by selected target platform
-            queryBuilder.withFilter(QueryBuilders.matchPhraseQuery("targetPlatforms", options.targetPlatform));
-        }
+        var queryBuilder = new NativeQueryBuilder();
+        queryBuilder.withQuery(builder -> builder.bool(boolQuery -> createSearchQuery(boolQuery, options)));
 
         // Sort search results according to 'sortOrder' and 'sortBy' options
         sortResults(queryBuilder, options.sortOrder, options.sortBy);
-        
-        try {
-            rwLock.readLock().lock();
-            var indexOps = searchOperations.indexOps(ExtensionSearch.class);
-            return searchOperations.search(queryBuilder.build(), ExtensionSearch.class, indexOps.getIndexCoordinates());
-        } finally {
-            rwLock.readLock().unlock();
+
+        var pages = new ArrayList<Pageable>();
+        pages.add(PageRequest.of(options.requestedOffset / options.requestedSize, options.requestedSize));
+        if(options.requestedOffset % options.requestedSize > 0) {
+            // size is not exact multiple of offset; this means we need to get two pages
+            // e.g. when offset is 20 and size is 50, you want results 20 to 70 which span pages 0 and 1 of a 50 item page
+            pages.add(pages.get(0).next());
+        }
+
+        var searchHitsList = new ArrayList<SearchHits<ExtensionSearch>>(pages.size());
+        for(var page : pages) {
+            queryBuilder.withPageable(page);
+            try {
+                rwLock.readLock().lock();
+                var searchHits = searchOperations.search(queryBuilder.build(), ExtensionSearch.class, searchOperations.indexOps(ExtensionSearch.class).getIndexCoordinates());
+                searchHitsList.add(searchHits);
+            } finally {
+                rwLock.readLock().unlock();
+            }
+        }
+
+        if(searchHitsList.size() == 2) {
+            var firstSearchHitsPage = searchHitsList.get(0);
+            var secondSearchHitsPage = searchHitsList.get(1);
+
+            List<SearchHit<ExtensionSearch>> searchHits = new ArrayList<>(firstSearchHitsPage.getSearchHits());
+            searchHits.addAll(secondSearchHitsPage.getSearchHits());
+            var endIndex = Math.min(searchHits.size(), options.requestedOffset + options.requestedSize);
+            var startIndex = Math.min(endIndex, options.requestedOffset);
+            searchHits = searchHits.subList(startIndex, endIndex);
+            return new SearchHitsImpl<>(
+                    firstSearchHitsPage.getTotalHits(),
+                    firstSearchHitsPage.getTotalHitsRelation(),
+                    firstSearchHitsPage.getMaxScore(),
+                    null,
+                    null,
+                    searchHits,
+                    null,
+                    null
+            );
+        } else {
+            return searchHitsList.get(0);
         }
     }
 
-    private void sortResults(NativeSearchQueryBuilder queryBuilder, String sortOrder, String sortBy) {
-        if (!"asc".equalsIgnoreCase(sortOrder) && !"desc".equalsIgnoreCase(sortOrder)) {
+    private ObjectBuilder<BoolQuery> createSearchQuery(BoolQuery.Builder boolQuery, Options options) {
+        if (!StringUtils.isEmpty(options.queryString)) {
+            boolQuery.should(QueryBuilders.term(builder ->
+                    builder.field("extensionId.keyword")
+                            .value(options.queryString)
+                            .caseInsensitive(true)
+                            .boost(10f)
+            ));
+
+            // Fuzzy matching of search query in multiple fields
+            var multiMatchQuery = QueryBuilders.multiMatch(builder ->
+                    builder.query(options.queryString)
+                            .fields("name").boost(5f)
+                            .fields("displayName").boost(5f)
+                            .fields("tags").boost(3f)
+                            .fields("namespace").boost(2f)
+                            .fields("description")
+                            .fuzziness("AUTO")
+                            .prefixLength(2)
+            );
+
+            boolQuery.should(multiMatchQuery).boost(5f);
+
+            // Prefix matching of search query in display name and namespace
+            var prefixString = options.queryString.trim().toLowerCase();
+            var namePrefixQuery = QueryBuilders.prefix(builder -> builder.field("displayName").value(prefixString));
+            boolQuery.should(namePrefixQuery).boost(2f);
+            var namespacePrefixQuery = QueryBuilders.prefix(builder -> builder.field("namespace").value(prefixString));
+            boolQuery.should(namespacePrefixQuery);
+        }
+
+        if (!StringUtils.isEmpty(options.category)) {
+            // Filter by selected category
+            boolQuery.must(QueryBuilders.matchPhrase(builder -> builder.field("categories").query(options.category)));
+        }
+        if (TargetPlatform.isValid(options.targetPlatform)) {
+            // Filter by selected target platform
+            boolQuery.must(QueryBuilders.matchPhrase(builder -> builder.field("targetPlatforms").query(options.targetPlatform)));
+        }
+        if (options.namespacesToExclude != null) {
+            // Exclude namespaces
+            for(var namespaceToExclude : options.namespacesToExclude) {
+                boolQuery.mustNot(QueryBuilders.term(builder -> builder.field("namespace.keyword").value(namespaceToExclude)));
+            }
+        }
+
+        return boolQuery;
+    }
+
+    private void sortResults(NativeQueryBuilder queryBuilder, String sortOrder, String sortBy) {
+        sortOrder = sortOrder.toLowerCase();
+        var orders = Map.of("asc", SortOrder.Asc, "desc", SortOrder.Desc);
+        var order = orders.get(sortOrder);
+        if (order == null) {
             throw new ErrorResultException("sortOrder parameter must be either 'asc' or 'desc'.");
         }
 
+        var types = Map.of(
+                "relevance", FieldType.Float,
+                "rating", FieldType.Float,
+                "timestamp", FieldType.Long,
+                "downloadCount", FieldType.Integer
+        );
+
+        var type = types.get(sortBy);
+        if(type == null) {
+            throw new ErrorResultException("sortBy parameter must be 'relevance', 'timestamp', 'averageRating' or 'downloadCount'.");
+        }
         if ("relevance".equals(sortBy)) {
-            queryBuilder.withSort(SortBuilders.scoreSort());
+            queryBuilder.withSort(builder -> builder.score(scoreSort -> scoreSort.order(order)));
         }
 
-        if ("relevance".equals(sortBy) || "averageRating".equals(sortBy)) {
-            queryBuilder.withSort(
-                    SortBuilders.fieldSort(sortBy).unmappedType("float").order(SortOrder.fromString(sortOrder)));
-        } else if ("timestamp".equals(sortBy)) {
-            queryBuilder.withSort(
-                    SortBuilders.fieldSort(sortBy).unmappedType("long").order(SortOrder.fromString(sortOrder)));
-        } else if ("downloadCount".equals(sortBy)) {
-            queryBuilder.withSort(
-                    SortBuilders.fieldSort(sortBy).unmappedType("integer").order(SortOrder.fromString(sortOrder)));
-        } else {
-            throw new ErrorResultException(
-                    "sortBy parameter must be 'relevance', 'timestamp', 'averageRating' or 'downloadCount'");
+        queryBuilder.withSort(builder -> builder.field(fieldSort -> fieldSort.field(sortBy).unmappedType(type).order(order)));
+    }
+
+    private long getMaxResultWindow() {
+        if(maxResultWindow == null) {
+            var settings = searchOperations.indexOps(ExtensionSearch.class).getSettings(true);
+            maxResultWindow = Long.parseLong(settings.get("index.max_result_window").toString());
         }
+
+        return maxResultWindow;
     }
 }

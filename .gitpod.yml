@@ -2,59 +2,67 @@ image:
   file: .gitpod.dockerfile
 
 ports:
-# Web UI (static resources)
 - port: 3000
-# Server (API, must be public for CORS)
+  name: Web UI
+  description: static resources
 - port: 8080
   visibility: public
   onOpen: ignore
-# Test report
+  name: Server
+  description: API, must be public for CORS
 - port: 8081
-# Java debugging
+  name: Test report
 - port: 5005
+  name: Java debugging
   onOpen: ignore
-# PostgreSQL
 - port: 5432
+  name: PostgreSQL
   onOpen: ignore
-# Elasticsearch
 - port: 9200
+  name: Elasticsearch
   onOpen: ignore
 - port: 9300
+  name: Elasticsearch
   onOpen: ignore
-# NodeJS debugging
 - port: 9229
+  name: NodeJS debugging
   onOpen: ignore
 
 tasks:
 - init: |
     # Build all components
-    yarn --cwd cli
-    yarn --cwd webui
-    yarn --cwd webui build:default
+    cd cli
+    yarn install
+    yarn prepare
+    cd ../webui
+    yarn install
+    yarn build
+    yarn build:default
+    cd ..
     server/gradlew -p server assemble downloadTestExtensions
   name: Server
   command: |
     if [[ $NPM_TOKEN ]]; then echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc; fi
     # Start Elasticsearch as background process
-    $ES_HOME/bin/elasticsearch -d -p $ES_HOME/pid -Ediscovery.type=single-node -Expack.ml.enabled=false
-    gp await-port 9200
+    $ES_HOME/bin/elasticsearch -d -p $ES_HOME/pid -Ediscovery.type=single-node -Expack.ml.enabled=false -Expack.security.enabled=false
+    gp ports await 9200
     # Start the server application
     cd server
     ./scripts/generate-properties.sh
     ./gradlew runServer
 - name: WebUI
   command: |
-    gp await-port 8080
+    gp ports await 8080
     # Start Express for serving frontend resources
     cd webui
     yarn start:default
 - name: Publisher
   command: |
-    gp await-port 8080
+    gp ports await 8080
     # Use the CLI to publish some test extensions to the running server
     export OVSX_REGISTRY_URL=http://localhost:8080
     export OVSX_PAT=super_token
-    export PUBLISHERS="DotJoshJohnson eamodio Equinusocio felixfbecker formulahendry HookyQR ms-azuretools ms-mssql ms-python ms-vscode octref redhat ritwickdey sburg vscode vscodevim Wscats"
+    export PUBLISHERS="DotJoshJohnson eamodio felixfbecker formulahendry HookyQR ms-azuretools ms-mssql ms-python ms-vscode octref redhat ritwickdey sburg vscode vscodevim Wscats"
     for pub in $PUBLISHERS; do cli/lib/ovsx create-namespace $pub; done
     find server/build/test-extensions-builtin -name '*.vsix' -exec cli/lib/ovsx publish '{}' \;
     find server/build/test-extensions -name '*.vsix' -exec cli/lib/ovsx publish '{}' \;

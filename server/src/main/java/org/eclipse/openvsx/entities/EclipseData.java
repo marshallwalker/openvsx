@@ -9,6 +9,7 @@
  ********************************************************************************/
 package org.eclipse.openvsx.entities;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
@@ -19,13 +20,13 @@ import java.util.Objects;
  * <p>This class is not mapped to a database entity, but parsed / serialized to
  * JSON via a column converter.
  */
-public class EclipseData implements Cloneable {
+public class EclipseData implements Cloneable, Serializable {
 
     public String personId;
 
     public PublisherAgreement publisherAgreement;
 
-    public static class PublisherAgreement {
+    public static class PublisherAgreement implements Serializable {
 
         public boolean isActive;
 
@@ -38,42 +39,28 @@ public class EclipseData implements Cloneable {
         public LocalDateTime timestamp;
 
         @Override
-        public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (!(obj instanceof PublisherAgreement))
-                return false;
-            var other = (PublisherAgreement) obj;
-            if (this.isActive != other.isActive)
-                return false;
-            if (!Objects.equals(this.documentId, other.documentId))
-                return false;
-            if (!Objects.equals(this.version, other.version))
-                return false;
-            if (!Objects.equals(this.timestamp, other.timestamp))
-                return false;
-            return true;
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            PublisherAgreement that = (PublisherAgreement) o;
+            return isActive == that.isActive
+                    && Objects.equals(documentId, that.documentId)
+                    && Objects.equals(version, that.version)
+                    && Objects.equals(timestamp, that.timestamp);
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(isActive, documentId, version, timestamp);
         }
-
     }
 
     @Override
-    public boolean equals(Object obj) {
-        if (this == obj)
-            return true;
-        if (!(obj instanceof EclipseData))
-            return false;
-        var other = (EclipseData) obj;
-        if (!Objects.equals(this.personId, other.personId))
-            return false;
-        if (!Objects.equals(this.publisherAgreement, other.publisherAgreement))
-            return false;
-        return true;
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        EclipseData that = (EclipseData) o;
+        return Objects.equals(personId, that.personId) && Objects.equals(publisherAgreement, that.publisherAgreement);
     }
 
     @Override
@@ -89,5 +76,4 @@ public class EclipseData implements Cloneable {
 			throw new RuntimeException(exc);
 		}
     }
-    
 }

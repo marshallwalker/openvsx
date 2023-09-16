@@ -8,59 +8,137 @@
  * SPDX-License-Identifier: EPL-2.0
  ********************************************************************************/
 
-import React, { FunctionComponent } from 'react';
-import { makeStyles, Grid } from '@material-ui/core';
+import React, { FunctionComponent, createContext, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Box, Button, Link, Paper, Grid, Typography } from '@mui/material';
+import { styled, Theme } from '@mui/material/styles';
+import WarningIcon from '@mui/icons-material/Warning';
 import { UserNamespaceExtensionListContainer } from './user-namespace-extension-list';
+import { AdminDashboardRoutes } from '../admin-dashboard/admin-dashboard';
 import { Namespace, UserData } from '../../extension-registry-types';
+import { NamespaceChangeDialog } from '../admin-dashboard/namespace-change-dialog';
 import { UserNamespaceMemberList } from './user-namespace-member-list';
+import { UserNamespaceDetails } from './user-namespace-details';
 
 export interface NamespaceDetailConfig {
     defaultMemberRole?: 'contributor' | 'owner';
 }
-export const NamespaceDetailConfigContext = React.createContext<NamespaceDetailConfig>({});
+export const NamespaceDetailConfigContext = createContext<NamespaceDetailConfig>({});
 
-const useStyles = makeStyles((theme) => ({
-    namespaceDetailContainer: {
-        flex: 5,
-        padding: theme.spacing(0, 1),
-        [theme.breakpoints.only('md')]: {
-            width: '80%'
-        },
-        [theme.breakpoints.down('sm')]: {
-            width: '100%'
-        }
+const NamespaceDetailContainer = styled(Grid)(({ theme }: { theme: Theme }) => ({
+    flex: 5,
+    padding: theme.spacing(0, 1),
+    [theme.breakpoints.only('md')]: {
+        width: '80%'
     },
-    extensionListContainer: {
-        marginTop: theme.spacing(4)
+    [theme.breakpoints.down('sm')]: {
+        width: '100%'
     }
 }));
 
-export const NamespaceDetail: FunctionComponent<NamespaceDetail.Props> = props => {
-    const classes = useStyles();
+const WarningPaper = styled(Paper)(({ theme }: { theme: Theme }) => ({
+    maxWidth: '800px',
+    margin: `0 ${theme.spacing(6)} ${theme.spacing(4)} ${theme.spacing(6)}`,
+    padding: theme.spacing(2),
+    display: 'flex',
+    [theme.breakpoints.down('sm')]: {
+        margin: `0 0 ${theme.spacing(2)} 0`,
+    }
+}));
 
+const NamespaceHeader = styled(Box)(({ theme }: { theme: Theme }) => ({
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing(1),
+    [theme.breakpoints.down('sm')]: {
+        flexDirection: 'column',
+        alignItems: 'center'
+    }
+}));
+
+export const NamespaceDetail: FunctionComponent<NamespaceDetailProps> = props => {
+    const [changeDialogIsOpen, setChangeDialogIsOpen] = useState(false);
+    const { pathname } = useLocation();
+
+    const handleCloseChangeDialog = async () => {
+        setChangeDialogIsOpen(false);
+    };
+    const handleOpenChangeDialog = () => {
+        setChangeDialogIsOpen(true);
+    };
+
+    const warningColor = props.theme === 'dark' ? '#fff' : '#151515';
     return <>
-        <Grid container direction='column' spacing={4} className={classes.namespaceDetailContainer}>
+        <NamespaceDetailContainer container direction='column' spacing={4}>
+            {
+                !props.namespace.verified && props.namespaceAccessUrl
+                ? <Grid item>
+                    <WarningPaper
+                        sx={{
+                            backgroundColor: `warning.${props.theme}`,
+                            color: warningColor,
+                            '& a': {
+                                color: warningColor,
+                                textDecoration: 'underline'
+                            }
+                        }}>
+                        <WarningIcon fontSize='large' />
+                        <Box ml={1}>
+                            This namespace is not verified. <Link
+                                href={props.namespaceAccessUrl}
+                                target='_blank' >
+                                See the documentation
+                            </Link> to learn about claiming namespaces.
+                        </Box>
+                    </WarningPaper>
+                </Grid>
+                : null
+            }
             <Grid item>
-                <UserNamespaceMemberList
-                    setLoadingState={props.setLoadingState}
-                    namespace={props.namespace}
-                    filterUsers={props.filterUsers}
-                    fixSelf={props.fixSelf} />
+                <NamespaceHeader>
+                    <Typography variant='h4'>{props.namespace.name}</Typography>
+                    { pathname.startsWith(AdminDashboardRoutes.NAMESPACE_ADMIN)
+                        ? <Button sx={{ ml: { xs: 2, sm: 2, md: 2, lg: 0, xl: 0 } }} variant='outlined' onClick={handleOpenChangeDialog}>
+                            Change Namespace
+                        </Button>
+                        : null
+                    }
+                </NamespaceHeader>
+            </Grid>
+            {
+                props.namespace.membersUrl
+                ? <Grid item>
+                    <UserNamespaceMemberList
+                        setLoadingState={props.setLoadingState}
+                        namespace={props.namespace}
+                        filterUsers={props.filterUsers}
+                        fixSelf={props.fixSelf} />
+                </Grid>
+                : null
+            }
+            <Grid item>
+                <UserNamespaceDetails namespace={props.namespace}/>
             </Grid>
             <Grid item>
                 <UserNamespaceExtensionListContainer
                     namespace={props.namespace}
                 />
             </Grid>
-        </Grid>
+        </NamespaceDetailContainer>
+        <NamespaceChangeDialog
+            open={changeDialogIsOpen}
+            onClose={handleCloseChangeDialog}
+            namespace={props.namespace}
+            setLoadingState={props.setLoadingState} />
     </>;
 };
 
-export namespace NamespaceDetail {
-    export interface Props {
-        namespace: Namespace;
-        filterUsers: (user: UserData) => boolean;
-        fixSelf: boolean;
-        setLoadingState: (loading: boolean) => void;
-    }
+export interface NamespaceDetailProps {
+    namespace: Namespace;
+    filterUsers: (user: UserData) => boolean;
+    fixSelf: boolean;
+    setLoadingState: (loading: boolean) => void;
+    namespaceAccessUrl?: string;
+    theme?: string;
 }

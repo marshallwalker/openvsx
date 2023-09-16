@@ -9,9 +9,6 @@
  * ****************************************************************************** */
 package org.eclipse.openvsx.util;
 
-import org.eclipse.openvsx.dto.ExtensionVersionDTO;
-import org.eclipse.openvsx.entities.ExtensionVersion;
-
 import java.util.List;
 
 public class TargetPlatform {
@@ -36,13 +33,6 @@ public class TargetPlatform {
                     NAME_DARWIN_X64 + "|" + NAME_DARWIN_ARM64 + "|" +
                     NAME_WEB + "|" + NAME_UNIVERSAL;
 
-    public static final String NAMES_PARAM_METADATA =
-            NAME_WIN32_X64 + "," + NAME_WIN32_IA32 + "," + NAME_WIN32_ARM64 + "," +
-                    NAME_LINUX_X64 + "," + NAME_LINUX_ARM64 + "," + NAME_LINUX_ARMHF + "," +
-                    NAME_ALPINE_X64 + "," + NAME_ALPINE_ARM64 + "," +
-                    NAME_DARWIN_X64 + "," + NAME_DARWIN_ARM64 + "," +
-                    NAME_WEB + "," + NAME_UNIVERSAL;
-
     public static final List<String> TARGET_PLATFORM_NAMES = List.of(
         NAME_WIN32_X64, NAME_WIN32_IA32, NAME_WIN32_ARM64,
         NAME_LINUX_X64, NAME_LINUX_ARM64, NAME_LINUX_ARMHF,
@@ -55,14 +45,6 @@ public class TargetPlatform {
 
     public static boolean isValid(String targetPlatform) {
         return targetPlatform != null && TARGET_PLATFORM_NAMES.contains(targetPlatform);
-    }
-
-    public static boolean isUniversal(ExtensionVersionDTO extVersion) {
-        return isUniversal(extVersion.getTargetPlatform());
-    }
-
-    public static boolean isUniversal(ExtensionVersion extVersion) {
-        return isUniversal(extVersion.getTargetPlatform());
     }
 
     public static boolean isUniversal(String targetPlatform) {
